@@ -8,7 +8,8 @@ ds = xr.open_dataset("../Data/ERA/ERA5_2019-1_total_precipitation.nc", engine="n
 ds["tp"] = 1000*ds["tp"] # On passe en mm/h
 
 # Get the CPC file names
-tous_les_cpc =  os.listdir("../Data/CPC_file/")[:1]
+nb_files_to_plot = 3
+tous_les_cpc =  os.listdir("../Data/CPC_file/")[:nb_files_to_plot]
 
 def temps_a_partir_cpc(cpc): # Extract date and hour from the filename
     chemin_entier = "CPC_file/" + str(cpc)

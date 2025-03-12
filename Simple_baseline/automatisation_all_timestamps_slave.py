@@ -79,7 +79,7 @@ def main(cpc_file, ds):
             (precip['longitude'] >= lon_min_output) & (precip['longitude'] <= lon_max_output), drop=True
         )
 
-        plot_map(precip_suisse["tp"], f"Images/{ref_fichier}/Basse résolution.png")
+        plot_map(precip_suisse["tp"], f"Images/{ref_fichier}/Low resolution.png")
 
 
         ########## Plotting bicubic interpolation ###################################################################
@@ -108,7 +108,7 @@ def main(cpc_file, ds):
 
         # Store & plot the data
         ds_interp = xr.DataArray(precipitation_fine, coords=[('latitude', new_latitudes), ('longitude', new_longitudes)])
-        plot_map(ds_interp, f"Images/{ref_fichier}/Interpolation bicubique.png")
+        plot_map(ds_interp, f"Images/{ref_fichier}/Bicubic interpolation.png")
 
         # We invert the y axis because the (0, 0) value corresponds to the lower_left, we want it to match the CPC_file where
         # (0, 0) corresponds to the upper left
@@ -142,7 +142,7 @@ def main(cpc_file, ds):
 
         # Store & plot the data
         ds_knn = xr.DataArray(precipitation_fine, coords=[('latitude', new_latitudes), ('longitude', new_longitudes)])
-        plot_map(ds_knn, f"Images/{ref_fichier}/Plus proche voisin k = {n_voisin}.png")
+        plot_map(ds_knn, f"Images/{ref_fichier}/k-NearestNeighbors where k = {n_voisin}.png")
 
         # We invert the y axis because the (0, 0) value corresponds to the lower_left, we want it to match the CPC_file where
         # (0, 0) corresponds to the upper left
@@ -220,7 +220,7 @@ def main(cpc_file, ds):
         subprocess.run(gs_command, check=True)
 
 
-    compress_pdf(f"Simple_baseline/Images/{ref_fichier}/figures.pdf", f"Simple_baseline/Images/{ref_fichier}/figures compressées.pdf")
+    compress_pdf(f"Simple_baseline/Images/{ref_fichier}/figures.pdf", f"Simple_baseline/Images/{ref_fichier}/compressed figures.pdf")
 
 
 
@@ -238,7 +238,7 @@ def main(cpc_file, ds):
             ############ RMSE computing #####################################################################
             res = np.nanmean((pred_ini - target_array) ** 2) ** 0.5
 
-            pdf_str = f"Root Mean Squared Error (RMSE): {str(res):.5}"
+            pdf_str = f"Root Mean Squared Error (RMSE): {str(res):.5} mm\n"
 
 
             ############ Plot the difference matrix (Prediction - Target) ####################################
@@ -256,10 +256,10 @@ def main(cpc_file, ds):
                             origin="upper", cmap="viridis", alpha=0.6) 
 
             # Colorbar plot
-            plt.colorbar(img, orientation="vertical", label="Difference")
+            plt.colorbar(img, orientation="vertical", label="Difference of precipitation in mm")
             ax.set_xticks([])
             ax.set_yticks([])
-            plt.title(f"{nom} - target \n" + date)
+            plt.title(f"Difference ({nom} - target) \n" + date)
 
             pdf.savefig()
             plt.close()
@@ -297,7 +297,7 @@ def main(cpc_file, ds):
             ######## Kolmogorov-Smirnov statistic ########################################################
 
             statistic, p_value = ks_2samp(pred[~np.isnan(pred)], target_flat[~np.isnan(target_flat)])
-            pdf_str += f"\nKolmogorov-Smirnov Distance (KS): {str(statistic):.4}, p-value: {str(p_value):.4}"
+            pdf_str += f"\nKolmogorov-Smirnov Distance (KS): {str(statistic):.4} mm, p-value: {str(p_value):.4}\n"
 
 
             ######## Plot Target/Prediction histogram ####################################################
@@ -321,13 +321,13 @@ def main(cpc_file, ds):
             p_true = np.nanpercentile(target_flat, 99.999) # 99.999th percentile of target probability dstribution
             p_pred = np.nanpercentile(pred, 99.999)  # 99.999th percentile of prediction probability dstribution
             error_99 = abs(p_true - p_pred)
-            pdf_str += f"\n99.999th Percentile Error (PE) : {str(error_99):.4} mm"
+            pdf_str += f"\n99.999th Percentile Error (PE) : {str(error_99):.4} mm\n"
 
 
             ####### Earth-Mover Distance (Wasserstein Distance) computing #############################
             emd = wasserstein_distance(pred[~np.isnan(pred)], target_flat[~np.isnan(target_flat)])
 
-            pdf_str += f"\nEarth-Mover Distance (EMD) : {emd:.4}"
+            pdf_str += f"\nEarth-Mover Distance (EMD) : {emd:.4}\n"
 
 
             ######## Spatial-Autocorrelation Error (SAE) computing ################################
@@ -364,7 +364,7 @@ def main(cpc_file, ds):
 
 
 
-            pdf_str += f"\nSpatial Auto-Correlation Error (SAE): {str(moran.I):.4}"
+            pdf_str += f"\nSpatial Auto-Correlation Error (SAE): {str(moran.I):.4}\n"
 
 
             # Plotting the metrics in a white page
