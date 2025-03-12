@@ -5,3 +5,5 @@ The input's resolution is 0.25° and the target's resolution is 1km, both tempor
 
 First this repository includes a "Simple baseline folder", where are implemented two shallow models (bicubic interpolation & kNN). To run those models, compute different metrics and plot relevant figures, one can run the "automatisation_all_timestamps_master.py". <br>
 Remark : To do so, you must have the CombiPreCip data in the folder : ../Data/CPC_file/<CPC19xxxx.h5> and the ERA-5 2019-01 data in the folder : ../Data/ERA/ERA5_2019-1_total_precipitation.nc
+
+The versions of librairies are stored in the requirements.txt, the script generates and compresses pdf files through GhostScript which can be dowloaded online. 
