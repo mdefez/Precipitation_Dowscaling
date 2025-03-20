@@ -6,27 +6,21 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
-import subprocess
-from scipy.ndimage import zoom
 import numpy as np
 from scipy.interpolate import griddata
 from sklearn.neighbors import KNeighborsRegressor
 import h5py
 import pyproj
 import pandas as pd
-import seaborn as sns
 from scipy.stats import wasserstein_distance
 from scipy.stats import ks_2samp
-from libpysal.weights import W
-from pysal.explore import esda
-from scipy.stats import gaussian_kde
-import pikepdf
 
 
 # Main function, run the entire pipeline (editing figures, making predictions and computing metrics)
+
 def main(cpc_file, ds):
-    ref_fichier = cpc_file[9:22]
-    date = f" {cpc_file[15:17]} January 2019 {cpc_file[17:19]}H"
+    ref_fichier = cpc_file[:13]
+    date = f" {cpc_file[6:8]} January 2019 {cpc_file[8:10]}H"
 
     chemin_image = os.path.join(os.getcwd(), "Simple_baseline/Images")
     fichier = os.path.join(chemin_image, ref_fichier)
@@ -152,7 +146,7 @@ def main(cpc_file, ds):
 
 
         # Open the hdf5 file
-        with h5py.File("../Data/" + cpc_file, 'r') as f:
+        with h5py.File("../../../downscaling/MeteoSwiss_Products/CPCH/2019/" + cpc_file, 'r') as f:
 
             # Acquire the data
             df = f["/dataset1"]["data1"]["data"]
@@ -191,37 +185,6 @@ def main(cpc_file, ds):
 
             pdf_fig.savefig()
             plt.close()
-    
-
-    # PDF compression using GhostScript
-    def compress_pdf(input_pdf, output_pdf):
-        
-        gs_path = "gswin64c"  # Version of gs
-
-        gs_command = [
-            gs_path,  
-            "-sDEVICE=pdfwrite", 
-            "-dCompatibilityLevel=1.4",  
-            "-dNOPAUSE",  
-            "-dQUIET",  
-            "-dBATCH",  
-            "-dDownsampleColorImages=true", 
-            "-dColorImageResolution=72", 
-            "-dDownsampleGrayImages=true", 
-            "-dGrayImageResolution=72",
-            "-dDownsampleMonoImages=true",  
-            "-dMonoImageResolution=72", 
-            "-dJPEGQ=75",  
-            "-dAutoFilterColorImages=true", 
-            "-sOutputFile=" + output_pdf,  
-            input_pdf 
-        ]
-
-        subprocess.run(gs_command, check=True)
-
-
-    compress_pdf(f"Simple_baseline/Images/{ref_fichier}/figures.pdf", f"Simple_baseline/Images/{ref_fichier}/compressed figures.pdf")
-
 
 
          
@@ -332,40 +295,7 @@ def main(cpc_file, ds):
 
             ######## Spatial-Autocorrelation Error (SAE) computing ################################
 
-            # Compute the residuals
-            residuals = target_array - pred_ini
-            residuals = np.nan_to_num(residuals, 0) # We fill the NaN with 0 so that it doesn't bother the value
-
-            # We create a weight class corresponding to our available data 
-            # We check for each direct neighbor (top, bottom, left, right), if it's a valid neighbor (in the matrix), its weight is set to 1
-            rows, cols = pred_ini.shape
-
-            neighbors = {}
-            weights = {}
-
-            for i in range(rows):
-                for j in range(cols):
-                    current_cell = i * cols + j  # Linear index for the cell (i, j)
-                    
-                    neighbors[current_cell] = []
-                    weights[current_cell] = []
-
-                    # Check for neighbors
-                    for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        ni, nj = i + di, j + dj
-                        if 0 <= ni < rows and 0 <= nj < cols:  # If the the neighbors is still in the matrix
-                            neighbor_cell = ni * cols + nj 
-                            neighbors[current_cell].append(neighbor_cell) 
-                            weights[current_cell].append(1) 
-
-            w = W(neighbors, weights)
-            moran = esda.Moran(residuals, w)
-
-
-
-
-            pdf_str += f"\nSpatial Auto-Correlation Error (SAE): {str(moran.I):.4}\n"
-
+            # Eventually write the code to compute the (right) SAE
 
             # Plotting the metrics in a white page
             plt.figure(figsize=(8, 8))  # Format A4 en pouces
