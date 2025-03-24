@@ -155,7 +155,7 @@ def main(com_file, ds):
         # (0, 0) corresponds to the upper left
         ds_knn_iso = np.array(ds_knn)[::-1, :]
 
-        ########## Plot the CPC (ground truth) ###################################################################
+        ########## Plot the COM (ground truth) ###################################################################
 
 
         # Open the com file
@@ -167,6 +167,17 @@ def main(com_file, ds):
 
             # We replace the 65535 by NaN
             df = df.replace(65535, np.nan)
+
+            # We replace the not french data by NaN (because it's fake measurements)
+            df.index = df.index.astype(int)
+            df.columns = df.columns.astype(int)
+
+            mask_lignes = (df.index >= 172) & (df.index <= 1134)
+            mask_colonnes = (df.columns >= 375) & (df.columns <= 1725)
+
+            df.loc[~mask_lignes, :] = np.nan 
+            df.loc[:, ~mask_colonnes] = np.nan  
+
 
             # We convert the values to mm
             df = df / 10
