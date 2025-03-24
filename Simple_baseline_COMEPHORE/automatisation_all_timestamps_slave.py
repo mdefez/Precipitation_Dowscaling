@@ -159,7 +159,7 @@ def main(com_file, ds):
 
 
         # Open the com file
-        with rasterio.open("../../../downscaling/raw_data/Comephore/Projected_data/2019/COMEPHORE_2019_1/2019/" + com_file, 'r') as f:
+        with rasterio.open("../../../downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019/" + com_file, 'r') as f:
 
             # Acquire the data
             df = f.read(1)
