@@ -1,17 +1,17 @@
 import pandas as pd
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, uniform_filter
 import rasterio
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-import re
-from scipy.ndimage import distance_transform_edt
+from matplotlib.backends.backend_pdf import PdfPages
 
 # Example of a file we want to blur
 nom_com_file = f"../../../downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019/Projected_2019020918_RR.gtif"
 
-def plot(df, title, sigma):# Plot a df in a pdf
+def plot(df, title, param, typ):# Plot a df in a pdf
+
     # We replace the 65535 by NaN
     df = df.replace(65535, np.nan)
 
@@ -43,30 +43,55 @@ def plot(df, title, sigma):# Plot a df in a pdf
 
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
-    legend = "No filter"
-    if isinstance(sigma, int):
-        legend = "Sigma = " + str(sigma)
-    ax.set_title(title + "\n" + legend)
+    legend = ""
+    if typ == "Gaussian filter":
+        legend = "Sigma = " + str(param)
+    if typ == "Mean filter":
+        legend = "Kernel size = " + str(param)
 
-    plt.savefig("Blurring/Images/" + "_".join(title.split(" ")) + ".png")
+    ax.set_title(title + "\n" + legend + "\n" + typ)
+
+    pdf_fig.savefig()
     plt.close()
 
-with rasterio.open(nom_com_file, 'r') as f:
-    df = f.read(1)
-    df = pd.DataFrame(df)
+with PdfPages(f"Blurring/example.pdf") as pdf_fig:
+    with rasterio.open(nom_com_file, 'r') as f:
+        df = f.read(1)
+        df = pd.DataFrame(df)
 
-    # Plot the real data
-    plot(df, "Original data", "No filter")
+        # Plot the real data
+        plot(df, "Original data", None, "No filter")
 
-    # Plot the slightly filtered data
-    sigma = 2  # Filter parameter, linked to the pixel's neighbors weights. The larger sigma the more we take into account the farther pixel
-    df_filtered = pd.DataFrame(gaussian_filter(df.replace(65535, np.nan), sigma=sigma), columns=df.columns)
+        ####################################### Gaussian filter
+        # Plot the slightly filtered data
+        sigma = 3  # Filter parameter, linked to the pixel's neighbors weights. The larger sigma the more we take into account the farther pixel
+        df_filtered = pd.DataFrame(gaussian_filter(df.replace(65535, np.nan), sigma=sigma), columns=df.columns)
 
-    plot(df_filtered, "Blurred data", sigma)
+        plot(df_filtered, "Blurred data", sigma, "Gaussian filter")
 
-    # Plot the significantly filtered data
-    sigma = 10  # Filter parameter, linked to the pixel's neighbors weights. The larger sigma the more we take into account the farther pixel
-    df_filtered = pd.DataFrame(gaussian_filter(df.replace(65535, np.nan), sigma=sigma), columns=df.columns)
+        # Plot the significantly filtered data
+        sigma = 20  # Filter parameter, linked to the pixel's neighbors weights. The larger sigma the more we take into account the farther pixel
+        df_filtered = pd.DataFrame(gaussian_filter(df.replace(65535, np.nan), sigma=sigma), columns=df.columns)
 
-    plot(df_filtered, "Very Blurred data", sigma)
+        plot(df_filtered, "Very Blurred data", sigma, "Gaussian filter")
+
+        ############################# Mean filter
+        new_df = df.copy()
+        new_df = new_df.replace(65535, np.nan)
+        valid_mask = np.isnan(new_df)
+        new_df[valid_mask] = 0
+
+
+        # Plot the slightly filtered data
+        kernel = 10  # Filter parameter, number of pixel to take into account
+        df_filtered = pd.DataFrame(uniform_filter(new_df, size=kernel), columns=df.columns)
+        df_filtered[valid_mask] = np.nan
+        plot(df_filtered, "Blurred data", kernel, "Mean filter")
+
+        # Plot the significantly filtered data
+        kernel = 100  # Filter parameter, number of pixel to take into account
+        df_filtered = pd.DataFrame(uniform_filter(new_df, size=kernel), columns=df.columns)
+        df_filtered[valid_mask] = np.nan
+        
+        plot(df_filtered, "Blurred data", kernel, "Mean filter")
         
