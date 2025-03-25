@@ -23,9 +23,9 @@ from PIL import Image
 
 # Main function, run the entire pipeline (editing figures, making predictions and computing metrics)
 
-def main(com_file, ds):
+def main(com_file, ds, month, nom_come_file):
     ref_fichier = com_file[10:-8]
-    date = f" {com_file[16:18]} January 2019 {com_file[18:20]}H"
+    date = f" {com_file[16:18]}D {month}M  2019 {com_file[18:20]}H"
 
     chemin_image = os.path.join(os.getcwd(), "Simple_baseline_COMEPHORE/Images")
     fichier = os.path.join(chemin_image, ref_fichier)
@@ -159,7 +159,7 @@ def main(com_file, ds):
 
 
         # Open the com file
-        with rasterio.open("../../../downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019/" + com_file, 'r') as f:
+        with rasterio.open(nom_come_file, 'r') as f:
 
             # Acquire the data
             df = f.read(1)
@@ -311,7 +311,7 @@ def main(com_file, ds):
 
             # Eventually write the code to compute the (right) SAE
 
-            # Plotting the metrics in a white page
+            ############# Plotting the metrics in a white page ###################################
             plt.figure(figsize=(8, 8))  # Format A4 en pouces
 
             plt.text(0, 0.5,  pdf_str, fontsize=12, verticalalignment="center", family="monospace", horizontalalignment='left')
@@ -330,10 +330,12 @@ def main(com_file, ds):
 
 name = sys.argv[1]  # Name of the coméphore file
 pickle_file = sys.argv[2]  # path to the ERA-5 file (actually only line corresponding to the expected timestamp)
+month = sys.argv[3]
+nom_come_file = sys.argv[4]
 
 # Extract the corresponding line
 with open(pickle_file, 'rb') as f:
     ligne_extraite = pickle.load(f)
 
 # Run the main function
-main(name, ligne_extraite)
+main(name, ligne_extraite, month, nom_come_file)
