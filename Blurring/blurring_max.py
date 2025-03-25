@@ -48,7 +48,7 @@ def plot(df, title, sigma):# Plot a df in a pdf
         legend = "Sigma = " + str(sigma)
     ax.set_title(title + "\n" + legend)
 
-    plt.savefig("Blurring/" + "_".join(title.split(" ")) + ".png")
+    plt.savefig("Blurring/Images/" + "_".join(title.split(" ")) + ".png")
     plt.close()
 
 with rasterio.open(nom_com_file, 'r') as f:
