@@ -46,7 +46,7 @@ with rasterio.open(file_path, "r") as src:
 
 
     # Plot the colorbar
-    plt.colorbar(im, ax=ax, label="Precipitation during the passed hour (mm)")
+    plt.colorbar(im, ax=ax, label="Precipitation during the past hour (mm)", pad = 0.1)
     ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
     ax.add_feature(cfeature.COASTLINE, edgecolor='black')
 

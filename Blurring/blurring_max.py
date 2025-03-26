@@ -37,7 +37,7 @@ def plot(df, title, param, typ):# Plot a df in a pdf
 
 
     # Plot the colorbar
-    plt.colorbar(im, ax=ax, label="Precipitation during the passed hour (mm)")
+    plt.colorbar(im, ax=ax, label="Precipitation during the past hour (mm)", pad = 0.1)
     ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
     ax.add_feature(cfeature.COASTLINE, edgecolor='black')
 
@@ -54,13 +54,16 @@ def plot(df, title, param, typ):# Plot a df in a pdf
     pdf_fig.savefig()
     plt.close()
 
-with PdfPages(f"Blurring/example.pdf") as pdf_fig:
+with PdfPages(f"Blurring/simple_blurring_example.pdf") as pdf_fig:
     with rasterio.open(nom_com_file, 'r') as f:
         df = f.read(1)
         df = pd.DataFrame(df)
 
         # Plot the real data
         plot(df, "Original data", None, "No filter")
+
+        # We compute the total of precipitation (the mass)
+        mass_before = float(df.sum().sum())
 
         ####################################### Gaussian filter
         # Plot the slightly filtered data

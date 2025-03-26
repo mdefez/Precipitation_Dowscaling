@@ -51,7 +51,8 @@ def main(com_file, ds, month, nom_come_file):
             ax.add_feature(cfeature.LAND, edgecolor='black', facecolor='lightgray')
 
             df_plot.plot(ax=ax, transform=ccrs.PlateCarree(), cmap='viridis', 
-                                cbar_kwargs={'label': "Precipitation during the passed hour (mm)"}, 
+                                cbar_kwargs={'label': "Precipitation during the past hour (mm)",
+                                             'pad' : 0.1}, 
                                 vmin=vmin, vmax=vmax)
 
             ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
@@ -190,7 +191,7 @@ def main(com_file, ds, month, nom_come_file):
 
 
             # Plot the colorbar
-            plt.colorbar(im, ax=ax, label="Precipitation during the passed hour (mm)")
+            plt.colorbar(im, ax=ax, label="Precipitation during the past hour (mm)", pad = 0.1)
             ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
             ax.add_feature(cfeature.COASTLINE, edgecolor='black')
 
@@ -233,7 +234,7 @@ def main(com_file, ds, month, nom_come_file):
                             origin="upper", cmap="viridis", alpha=0.6) 
 
             # Colorbar plot
-            plt.colorbar(img, orientation="vertical", label="Difference of precipitation in mm")
+            plt.colorbar(im, ax=ax, label="Precipitation during the past hour (mm)", pad = 0.1)
             ax.set_xticks([])
             ax.set_yticks([])
             plt.title(f"Difference ({nom} - target) \n" + date)
