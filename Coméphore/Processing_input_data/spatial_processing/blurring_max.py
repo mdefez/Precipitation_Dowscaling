@@ -54,7 +54,7 @@ def plot(df, title, param, typ):# Plot a df in a pdf
     pdf_fig.savefig()
     plt.close()
 
-with PdfPages(f"Blurring/simple_blurring_example.pdf") as pdf_fig:
+with PdfPages(f"Coméphore/Processing_input_data/spatial_processing/Images/simple_blurring_example.pdf") as pdf_fig:
     with rasterio.open(nom_com_file, 'r') as f:
         df = f.read(1)
         df = pd.DataFrame(df)

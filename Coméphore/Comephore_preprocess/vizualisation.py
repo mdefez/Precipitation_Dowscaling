@@ -53,5 +53,5 @@ with rasterio.open(file_path, "r") as src:
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
     plt.title(date)
-    plt.savefig(f"Coméphore_preprocess/Images/example_{strategie_projection}.png")
+    plt.savefig(f"Coméphore/Coméphore_preprocess/Images/example_{strategie_projection}.png")
     plt.close()

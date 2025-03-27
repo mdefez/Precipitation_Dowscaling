@@ -1,3 +1,8 @@
+#######################################
+###### BE CAREFUL #####################
+# this script is supposed to be ran where you want to download the Coméphore dataset, so probably not here
+#######################################
+
 import requests
 import os
 import tarfile

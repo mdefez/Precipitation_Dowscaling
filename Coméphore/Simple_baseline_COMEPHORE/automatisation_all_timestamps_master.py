@@ -48,7 +48,7 @@ for com, ligne_index in zip(tous_les_com, indices_ligne):
     com_file = f"../../../downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_{month_to_work_on}/2019/" + com
 
     # Run the slave with the corresponding cpc_file & ERA line
-    result = subprocess.run(['python', 'Simple_baseline_COMEPHORE/automatisation_all_timestamps_slave.py', com, pickle_file, month_to_work_on, com_file], capture_output=True, text=True)
+    result = subprocess.run(['python', 'Coméphore/Simple_baseline_COMEPHORE/automatisation_all_timestamps_slave.py', com, pickle_file, month_to_work_on, com_file], capture_output=True, text=True)
     print(result.stdout)
     print(result.stderr)
 

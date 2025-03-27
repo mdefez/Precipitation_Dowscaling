@@ -27,14 +27,14 @@ def main(com_file, ds, month, nom_come_file):
     ref_fichier = com_file[10:-8]
     date = f" {com_file[16:18]}D {month}M  2019 {com_file[18:20]}H"
 
-    chemin_image = os.path.join(os.getcwd(), "Simple_baseline_COMEPHORE/Images")
+    chemin_image = os.path.join(os.getcwd(), "Coméphore/Simple_baseline_COMEPHORE/Images")
     fichier = os.path.join(chemin_image, ref_fichier)
 
     # Create a file for the tiemstamps if it does not exists
     if not os.path.exists(fichier):
         os.makedirs(fichier)  
 
-    with PdfPages(f"Simple_baseline_COMEPHORE/Images/{ref_fichier}/figures.pdf") as pdf_fig:
+    with PdfPages(f"Coméphore/Simple_baseline_COMEPHORE/Images/{ref_fichier}/figures.pdf") as pdf_fig:
 
         ########## Plotting ERA-5 ##########
 
@@ -209,7 +209,7 @@ def main(com_file, ds, month, nom_come_file):
 
     # This function computes all the metrics and store them in a generated pdf file
     def métrique(pred_ini, target, nom):
-        with PdfPages(f"Simple_baseline_COMEPHORE/Images/{ref_fichier}/metrics {nom}.pdf") as pdf:
+        with PdfPages(f"Coméphore/Simple_baseline_COMEPHORE/Images/{ref_fichier}/metrics {nom}.pdf") as pdf:
 
             target_array = np.asarray(target)
 

@@ -33,7 +33,7 @@ def plot(df, typ, sr_factor):# Plot a df in a png file
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
     plt.title(f"Timestamp : {nom_com_file.split("/")[-1][10:20]}\nBlurred data with {typ} filter, {dico_name_params[typ]} : {params[typ]} {dico_units[typ]} \nSpatial Downsampling by factor {sr_factor}")
-    plt.savefig("Blurring/process_example.png")
+    plt.savefig("Coméphore/Processing_input_data/spatial_processing/Images/process_example.png")
     plt.close()
 
 
@@ -183,7 +183,7 @@ with rasterio.open(nom_com_file, 'r') as f:
     downsampled_df = downsampling(conserved_df, spatial_factor)
 
     # Set to nan if not in france
-    path_shp = "Blurring/filter_france"
+    path_shp = "Coméphore/Processing_input_data/filter_france"
     fill_na_df = filter_data_by_france(downsampled_df, path_shp, spatial_factor)
 
     plot(fill_na_df, typ = filter_to_use, sr_factor=spatial_factor)
