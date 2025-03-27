@@ -1,4 +1,6 @@
 # Use this script to plot (& save) an example of the projected Coméphore dataset
+# We look ath the file corresponding to the "filepath"
+
 import numpy as np
 import cartopy.crs as ccrs
 import rasterio
@@ -7,16 +9,13 @@ from rasterio.plot import show
 import pandas as pd
 import cartopy.feature as cfeature
 
-# open the GeoTIFF file
 
-# Eventually change the strategy here ################################        ##############################################
-file_path = "../../../downscaling/mdefez/Comephore/Projected_data/test/2154/2019/COMEPHORE_2019_2/2019/Projected_2019020718_RR.gtif"
+file_path = "../../../downscaling/mdefez/Comephore/Projected_data/2024/COMEPHORE_2024_1/2024/Projected_2024010718_RR.gtif"
 
 with rasterio.open(file_path, "r") as src:
     # We read the image
     image = src.read(1)
     date = file_path.split("/")[-1][10:20]
-    strategie_projection = file_path.split("/")[-5]
 
     # We process it to plot it correctly
     df = pd.DataFrame(image)
@@ -53,5 +52,5 @@ with rasterio.open(file_path, "r") as src:
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
     plt.title(date)
-    plt.savefig(f"Coméphore/Coméphore_preprocess/Images/example_{strategie_projection}.png")
+    plt.savefig(f"Coméphore/Comephore_preprocess/Images/example.png")
     plt.close()

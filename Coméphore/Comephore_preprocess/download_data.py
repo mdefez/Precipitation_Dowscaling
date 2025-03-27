@@ -1,7 +1,5 @@
-#######################################
-###### BE CAREFUL #####################
-# this script is supposed to be ran where you want to download the Coméphore dataset, so probably not here
-#######################################
+# This scripts downloads the original Coméphore dataset into the specified path
+# It also extracts the corresponding .tar file
 
 import requests
 import os
@@ -14,7 +12,10 @@ api_url = f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/"
 response = requests.get(api_url)
 data = response.json()
 
-year_to_download = 2019
+year_to_download = 2023
+
+# Path to the uploading file
+path_upload = "../../../downscaling/raw_data/Comephore/Original_data"
 
 # Download files
 for resource in data["resources"]:
@@ -25,31 +26,29 @@ for resource in data["resources"]:
     except ValueError:
         break
 
-    # Only download the 2019 year yet
+    # Download data for the specified year
     if année == year_to_download:
 
         # Get the url to download
         file_url = resource["url"]
 
         # Download if doesn't exist yet
-        if os.path.exists(f"COMEPHORE_{année}_{mois}.tar") == False:
+        if os.path.exists(f"{path_upload}/COMEPHORE_{année}_{mois}.tar") == False:
             print(année, mois)
             file_response = requests.get(file_url)
-            with open(f"COMEPHORE_{année}_{mois}.tar", "wb") as f:
+            with open(f"{path_upload}/COMEPHORE_{année}_{mois}.tar", "wb") as f:
                 f.write(file_response.content)
 
 # Extract the data wich are .tar file
-source = os.getcwd()
-dossier_extraction = os.path.join(source, "Original_data")
-dossier_extraction = os.path.join(dossier_extraction, str(year_to_download))
+dossier_extraction = os.path.join(path_upload, str(year_to_download))
 
 
 os.makedirs(dossier_extraction, exist_ok=True)
 
-for fichier in os.listdir(source):
+for fichier in os.listdir(path_upload):
     if fichier.endswith(".tar"):
         print(f"extracting {fichier}")
-        chemin_tar = os.path.join(source, fichier)
+        chemin_tar = os.path.join(path_upload, fichier)
         dossier_sortie = os.path.join(dossier_extraction, fichier.replace(".tar", ""))
 
         os.makedirs(dossier_sortie, exist_ok=True)  # Create file if doesn't exist
@@ -60,10 +59,8 @@ for fichier in os.listdir(source):
 
 # We now can delete the .tar file given that they were exported
 
-dossier_tar = os.getcwd()
-
-for fichier in os.listdir(dossier_tar):
+for fichier in os.listdir(path_upload):
     if fichier.endswith(".tar"):  
-        chemin_tar = os.path.join(dossier_tar, fichier)
+        chemin_tar = os.path.join(path_upload, fichier)
         print(f"Deleting {fichier}")
         os.remove(chemin_tar)  #delete

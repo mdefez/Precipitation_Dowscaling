@@ -1,5 +1,6 @@
 import sys
 import pickle
+from Coméphore.Processing_input_data.tools import plot_coméphore_high_res, save_pdf_coméphore_high_res
 import xarray as xr
 import rasterio
 from matplotlib.backends.backend_pdf import PdfPages
@@ -10,20 +11,17 @@ import os
 import numpy as np
 from scipy.interpolate import griddata
 from sklearn.neighbors import KNeighborsRegressor
-import h5py
-import pyproj
 import pandas as pd
 from scipy.stats import wasserstein_distance
 from scipy.stats import ks_2samp
-import pikepdf
-import fitz
-import io 
-from PIL import Image
+
+sys.path.append(os.path.join(os.getcwd(), "Coméphore/Processing_input_data"))
+import tools as tool
 
 
 # Main function, run the entire pipeline (editing figures, making predictions and computing metrics)
 
-def main(com_file, ds, month, nom_come_file):
+def main(com_file, ):
     ref_fichier = com_file[10:-8]
     date = f" {com_file[16:18]}D {month}M  2019 {com_file[18:20]}H"
 
@@ -31,64 +29,13 @@ def main(com_file, ds, month, nom_come_file):
     fichier = os.path.join(chemin_image, ref_fichier)
 
     # Create a file for the tiemstamps if it does not exists
-    if not os.path.exists(fichier):
-        os.makedirs(fichier)  
+    os.makedirs(fichier, exist_ok=True)  
 
     with PdfPages(f"Coméphore/Simple_baseline_COMEPHORE/Images/{ref_fichier}/figures.pdf") as pdf_fig:
 
-        ########## Plotting ERA-5 ##########
+        ### Loading the true com_file and plotting it #############################################################
 
-        vmin = 0
-        vmax = 4
-
-        # Function to plot a map from a xarray
-        def plot_map(df_plot, nom):
-            # Create the figure with the geographical background
-            fig, ax = plt.subplots(figsize=(6, 6), subplot_kw={'projection': ccrs.PlateCarree()})
-
-            ax.coastlines()
-            ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
-            ax.add_feature(cfeature.LAND, edgecolor='black', facecolor='lightgray')
-
-            df_plot.plot(ax=ax, transform=ccrs.PlateCarree(), cmap='viridis', 
-                                cbar_kwargs={'label': "Precipitation during the past hour (mm)",
-                                             'pad' : 0.1}, 
-                                vmin=vmin, vmax=vmax)
-
-            ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
-
-            titre = nom.split("/")[-1][:-4] + "\n" + date
-            ax.set_title(titre)
-
-            # Save the fig in the pdf
-            pdf_fig.savefig()
-            plt.close()
-            
-
-        precip = ds.copy()
-
-        # We map the 0-360 lon from ERA-5 to the -180/180 of com
-        precip["longitude"] = xr.apply_ufunc(lambda x: x if x <= 180 else x - 360, precip["longitude"], vectorize = True)
-
-        # Lat/lon of the lower_left / upper_right com_file
-        lon_min_output = -9.965 
-        lat_min_output = 39.4626295723437 
-        lon_max_output = 14.563084827903268
-        lat_max_output = 54.184031134174326
-
-        # Filtering the xarray data to the concerned area
-        # Be careful, ERA-5 goes to 0 to 360 in lon where coméphore is -180 to 180
-        precip_fr = precip.where(
-            (precip['latitude'] >= lat_min_output) & (precip['latitude'] <= lat_max_output) 
-            & (precip['longitude'] <= lon_max_output) & (precip["longitude"] >= lon_min_output), drop=True
-        )
-
-
-        precip_fr = precip_fr.sortby("longitude")
-
-
-        plot_map(precip_fr["tp"], f"Images/{ref_fichier}/Low resolution.png")
-
+        save_pdf_coméphore_high_res(pdf=pdf_fig, gtif_file=com_file, nb_hours=1, title = "Coméphore ground truth high res")
 
         ########## Plotting bicubic interpolation ###################################################################
 
@@ -156,52 +103,8 @@ def main(com_file, ds, month, nom_come_file):
         # (0, 0) corresponds to the upper left
         ds_knn_iso = np.array(ds_knn)[::-1, :]
 
-        ########## Plot the COM (ground truth) ###################################################################
 
-
-        # Open the com file
-        with rasterio.open(nom_come_file, 'r') as f:
-
-            # Acquire the data
-            df = f.read(1)
-            df = pd.DataFrame(df)
-
-            # We replace the 65535 by NaN
-            df = df.replace(65535, np.nan)
-
-            # We replace the not french data by NaN (because it's fake measurements)
-            df.index = df.index.astype(int)
-            df.columns = df.columns.astype(int)
-
-            mask_lignes = (df.index >= 172) & (df.index <= 1134)
-            mask_colonnes = (df.columns >= 375) & (df.columns <= 1725)
-
-            df.loc[~mask_lignes, :] = np.nan 
-            df.loc[:, ~mask_colonnes] = np.nan  
-
-
-            # We convert the values to mm
-            df = df / 10
-
-            fig, ax = plt.subplots(figsize=(6, 4), subplot_kw={'projection': ccrs.PlateCarree()})  
-
-            # Plotting the heatmap
-            im = ax.imshow(df, extent=[-9.965, 14.563084827903268, 39.4626295723437, 54.184031134174326], origin='upper', cmap='viridis',
-                        vmin=vmin, vmax=vmax)
-
-
-            # Plot the colorbar
-            plt.colorbar(im, ax=ax, label="Precipitation during the past hour (mm)", pad = 0.1)
-            ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
-            ax.add_feature(cfeature.COASTLINE, edgecolor='black')
-
-            ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
-
-            ax.set_title("Ground Truth from Coméphore" + "\n" + date)
-
-            pdf_fig.savefig()
-            plt.close()
-
+       
          
     ########## Metrics computing ###################################################################
 

@@ -171,7 +171,7 @@ with rasterio.open(nom_com_file, 'r') as f:
     dico_units = {"mean" : "", "gaussian" : "mm"}
 
     # Choose here the type of filter to use
-    filter_to_use = "gaussian"
+    filter_to_use = "mean"
 
     filtered_df = dico_filter[filter_to_use](df, params[filter_to_use])
 

@@ -4,8 +4,8 @@ import sys
 import numpy as np
 import re
 
-sys.path.append(os.getcwd())
-import Processing_inputs.tools as tool
+sys.path.append(os.path.join(os.getcwd(), "Coméphore/Processing_input_data"))
+import tools as tool
 
 
 
@@ -13,7 +13,7 @@ import Processing_inputs.tools as tool
 
 def group_rasters_by_time_and_save(directory, temp_factor):
     os.makedirs("Coméphore/Processing_input_data/temporal_downsampling/Images/hourly", exist_ok=True)
-    os.makedirs("Coméphore/Processing_input_data/temporal_downsampling/Images/stacked", exist_ok=True)
+    os.makedirs(f"Coméphore/Processing_input_data/temporal_downsampling/Images/stacked_factor_{temp_factor}", exist_ok=True)
     # Dictionnary to store the groupped files
 
 
@@ -48,31 +48,31 @@ def group_rasters_by_time_and_save(directory, temp_factor):
                     time_groups[f"{list_int_keys[-1]}-24"].append(data)
 
 
-    # Somme des rasters dans chaque groupe et sauvegarde les fichiers
+    # Sum the files & save them
     for time_period, rasters in time_groups.items():
-        if rasters:  # Si le groupe contient des rasters
+        if rasters:  # If not empty (it should never be)
             summed_raster = np.sum(rasters, axis=0)
             
-            # Créer un nom pour le fichier de sortie basé sur la date et le groupe horaire
+            # We put the date and hour range in the output filename
             output_filename = f"{date}_{time_period}.gtif"
             output_path = os.path.join(directory, output_filename)
 
-            # Sauvegarder le raster agrégé dans un nouveau fichier
+            # We load any gtif to read and copy the metadata
             with rasterio.open(os.path.join(directory, filename)) as src:
                 meta = src.meta
-                meta.update(dtype=rasterio.float32, count=1, driver='GTiff')  # Spécifier le driver 'GTiff'
+                meta.update(dtype=rasterio.float32, count=1, driver='GTiff')  
                 
-                # Sauvegarder le nouveau fichier
+                # Save the aggregated file
                 with rasterio.open(output_path, 'w', **meta) as dst:
                     dst.write(summed_raster.astype(rasterio.float32), 1)
                 tool.plot_coméphore_high_res(gtif_file=output_path, 
-                                             output_folder="Coméphore/Processing_input_data/temporal_downsampling/Images/stacked",
-                                             nb_hours=temp_factor)
+                                             output_folder=f"Coméphore/Processing_input_data/temporal_downsampling/Images/stacked_factor_{temp_factor}",
+                                             nb_hours=temp_factor) # Plot for the example
 
                 print(f"Uploaded file : {output_filename}")
 
-# Appeler la fonction avec ton répertoire
+# Path to the hourly data
 directory = "../../../downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019"
-group_rasters_by_time_and_save(directory, 4)
+group_rasters_by_time_and_save(directory, temp_factor = 4)
 
 

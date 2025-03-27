@@ -1,6 +1,5 @@
-from email.errors import StartBoundaryNotFoundDefect
-from traceback import print_exc
-from xml.sax import SAXNotRecognizedException
+# This scripts projects the original dataset into the EPSG:4326 and save it to the "destination" path
+
 import rasterio
 import rasterio.warp
 import os
@@ -32,17 +31,17 @@ epsg_9829 = "EPSG:9829"
 
 epsg_2154 = "EPSG:2154"
 
-crs = comephore_crs # Choose the strategy here
+crs = comephore_crs # Choose the strategy here between comephore_crs / epsg_2154 / epsg_9829
 
 dico_strategy = {comephore_crs : "no_epsg", epsg_2154 : "2154", epsg_9829 : "9829"}
 
 strategy = dico_strategy[crs]
 
 # Only source data from this year will be projected
-year_to_reproject = 2019 
+year_to_reproject = 2020 
 
 # Data are classified by month so we have to loop on them
-for k in range(2, 3): # Set to 13 to convert all the data, to 2 just to test on one
+for k in range(1, 13): # Set to 13 to convert all the data, to 2 just to test on one
     print(k)
     year_month_to_reproject = f"{year_to_reproject}/COMEPHORE_{year_to_reproject}_{k}/{year_to_reproject}"
 
@@ -58,11 +57,11 @@ for k in range(2, 3): # Set to 13 to convert all the data, to 2 just to test on 
         with rasterio.open(source + "/" + file) as src:
             # compute the transformation to EPSG:4326
             transform, width, height = rasterio.warp.calculate_default_transform(
-                comephore_crs, "EPSG:4326", src.width, src.height, *src.bounds
+                crs, "EPSG:4326", src.width, src.height, *src.bounds
             )
 
             # Upload the reprojected data in the destination folder, that we create if it does not exist
-            destination = f"../../../downscaling/mdefez/Comephore/Projected_data/test/{strategy}/{year_month_to_reproject}"
+            destination = f"../../../downscaling/mdefez/Comephore/Projected_data/{year_month_to_reproject}"
             os.makedirs(destination, exist_ok=True)
 
             with rasterio.open(destination + "/" + "Projected_" + file, "w", driver='GTiff', height=height, width=width,
@@ -76,7 +75,7 @@ for k in range(2, 3): # Set to 13 to convert all the data, to 2 just to test on 
                     source=rasterio.band(src, 1),  
                     destination=rasterio.band(dst, 1),
                     src_transform=src.transform,
-                    src_crs=comephore_crs,
+                    src_crs=crs,
                     dst_transform=transform,
                     dst_crs="EPSG:4326",
                     resampling=rasterio.enums.Resampling.nearest
