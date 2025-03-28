@@ -1,9 +1,12 @@
 # This file stores useful functions concerning the Coméphore dataset
 
+from array import array
 from turtle import down
 import pandas as pd
 import numpy as np
 import os
+import re
+from typing import Union
 from scipy.ndimage import gaussian_filter, uniform_filter
 import rasterio
 import matplotlib.pyplot as plt
@@ -24,6 +27,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.interpolate import griddata
 import geopandas as gpd
 from shapely.geometry import Point, Polygon
+import ipdb
 
 # Example of path to projected data
 path_projected = f"../../../downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019/Projected_2019020918_RR.gtif"
@@ -36,9 +40,9 @@ path_projected = f"../../../downscaling/mdefez/Comephore/Projected_data/test/982
 
 ## The following functions are sub functions
 
-
-def plot(df, gtif_file, output_folder, nb_hours = 1):# Plot a df in a png file
-
+# Plot the df, gtif_file is either the path or ""
+def plot(df, gtif_file, output_folder, nb_hours = 1, title = None):# Plot a df in a png file
+    os.makedirs(output_folder, exist_ok=True)
     fig, ax = plt.subplots(figsize=(6, 4), subplot_kw={'projection': ccrs.PlateCarree()})  
 
     # Plotting the heatmap
@@ -54,12 +58,19 @@ def plot(df, gtif_file, output_folder, nb_hours = 1):# Plot a df in a png file
 
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
-    name_file = gtif_file.split("/")[-1][:-5]
+    # If gtif is the path
+    if title == None:
+        name_file = gtif_file.split("/")[-1][:-5]
+    # If gtif is ""
+    else:
+        name_file = title
+
     plt.title(f"File : {name_file}")
     plt.savefig(f"{output_folder}/{name_file}.png")
+
     plt.close()
 
-def save_pdf(pdf, df, gtif_file, nb_hours = 1, title = "default"): # Save the df plot in the specified pdf
+def save_pdf(pdf, df, gtif_file, nb_hours = 1, title = None): # Save the df plot in the specified pdf
 
     fig, ax = plt.subplots(figsize=(6, 4), subplot_kw={'projection': ccrs.PlateCarree()})  
 
@@ -68,7 +79,6 @@ def save_pdf(pdf, df, gtif_file, nb_hours = 1, title = "default"): # Save the df
                    vmin=0, vmax = 4*nb_hours
 )
 
-
     # Plot the colorbar
     plt.colorbar(im, ax=ax, label=f"Precipitation during the past {nb_hours} hour(s) (mm)", pad = 0.1)
     ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
@@ -76,12 +86,14 @@ def save_pdf(pdf, df, gtif_file, nb_hours = 1, title = "default"): # Save the df
 
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
-    name_file = gtif_file.split("/")[-1][:-5]
-
-    if title == "default":
+    # If the gtif is a path
+    if title == None:
+        name_file = gtif_file.split("/")[-1][:-5]
         plt.title(f"File : {name_file}")
+
+    # If the gtif is ""
     else:
-        plt.title(f"{title}\n{name_file}")
+        plt.title(f"{title}")
     pdf.savefig()
     plt.close()
 
@@ -122,7 +134,7 @@ def filter_data_by_france(df, shapefile_path, spatial_factor):
 
     return df_final
 
-def good_format(df): # Set df to the good format 
+def good_format(df, divide = True): # Set df to the good format 
 
     # We replace the 65535 by NaN
     df[df >= 65535] = np.nan
@@ -139,7 +151,8 @@ def good_format(df): # Set df to the good format
 
 
     # We convert the values to mm
-    df = df / 10
+    if divide == True:
+        df = df / 10
 
     return df 
 
@@ -150,49 +163,70 @@ def good_format(df): # Set df to the good format
 
 # This function plot a frame from the gtif file
 # ONLY USE IT IF FOR HIGH RES
-def plot_coméphore_high_res(gtif_file, output_folder, nb_hours = 1):
+# One can specify a path or a dataframe
+def plot_coméphore_high_res(gtif_file : Union[str, pd.DataFrame], output_folder, nb_hours = 1, title = None, divide = True):
+    if isinstance(gtif_file, str):
+        with rasterio.open(gtif_file, 'r') as f:
+            df = f.read(1)
+            df = pd.DataFrame(df)
 
-    with rasterio.open(gtif_file, 'r') as f:
-        df = f.read(1)
-        df = pd.DataFrame(df)
-        df = good_format(df)
- 
-        plot(df, gtif_file, output_folder, nb_hours)
+            df = good_format(df, divide)
 
-def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1):
+    
+            plot(df, gtif_file, output_folder, nb_hours, title)
+    
+    else:
+        df = good_format(gtif_file, divide)
 
-    with rasterio.open(gtif_file, 'r') as f:
-        df = f.read(1)
-        df = pd.DataFrame(df)
-        df = good_format(df)
- 
-        save_pdf(pdf, df, gtif_file, nb_hours)
+        plot(df, "", output_folder, nb_hours, title=title)
+
+def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1, title = None, divide = True):
+    if isinstance(gtif_file, str):
+        with rasterio.open(gtif_file, 'r') as f:
+            df = f.read(1)
+            df = pd.DataFrame(df)
+            df = good_format(df, divide)
+    
+            save_pdf(pdf, df, gtif_file, nb_hours, title)
+    else:
+        df = good_format(gtif_file, divide)
+
+        save_pdf(pdf, df, "", nb_hours, title = title)
 
 # This function plot a frame from the gtif file
 # ONLY USE IT IF FOR CUSTOM RES (it's longer to compute)
 # It only plot the data and filter it to the franch borders
-def plot_coméphore_low_res(gtif_file, output_folder, spatial_factor = 30, nb_hours = 1):
+def plot_coméphore_low_res(gtif_file : Union[str, pd.DataFrame], output_folder, spatial_factor = 30, nb_hours = 1, title = None, divide = True):
+    if isinstance(gtif_file, str):
+        with rasterio.open(gtif_file, 'r') as f:
+            df = f.read(1)
+            df = pd.DataFrame(df)
 
-    with rasterio.open(gtif_file, 'r') as f:
-        df = f.read(1)
-        df = pd.DataFrame(df)
+            fill_na_df = filter_data_by_france(df, "Coméphore/Processing_input_data/filter_france", spatial_factor)
 
-        fill_na_df = filter_data_by_france(df, "Blurring/filter_france", spatial_factor)
+            plot(fill_na_df, gtif_file, output_folder, nb_hours, title)
+    
+    else:
+        fill_na_df = filter_data_by_france(gtif_file, "Coméphore/Processing_input_data/filter_france", spatial_factor)
 
-        plot(fill_na_df, gtif_file, output_folder, nb_hours)
+        plot(fill_na_df, "", output_folder, nb_hours, title = title)
 
 
 
-def save_pdf_coméphore_low_res(pdf, gtif_file, spatial_factor = 30, nb_hours = 1):
+def save_pdf_coméphore_low_res(pdf, gtif_file, spatial_factor = 30, nb_hours = 1, title = None, divide = True):
+    if isinstance(gtif_file, str):
+        with rasterio.open(gtif_file, 'r') as f:
+            df = f.read(1)
+            df = pd.DataFrame(df)
 
-    with rasterio.open(gtif_file, 'r') as f:
-        df = f.read(1)
-        df = pd.DataFrame(df)
+            fill_na_df = filter_data_by_france(df, "Coméphore/Processing_input_data/filter_france", spatial_factor)
 
-        fill_na_df = filter_data_by_france(df, "Blurring/filter_france", spatial_factor)
+            save_pdf(pdf, fill_na_df, gtif_file, nb_hours, title)
 
-        save_pdf(pdf, fill_na_df, gtif_file, nb_hours)
+    else:
+        fill_na_df = filter_data_by_france(gtif_file, "Coméphore/Processing_input_data/filter_france", spatial_factor)
 
+        save_pdf(pdf, fill_na_df, "", nb_hours, title = title)
 
 
 #################################################################################################################################
@@ -203,6 +237,25 @@ def save_pdf_coméphore_low_res(pdf, gtif_file, spatial_factor = 30, nb_hours = 
 # & spatial downsampling
 
 # There are a few subfunctions for only one main function
+
+# This functions takes as input a list of string containing a number and a second list of the same length, 
+# It returns both lists ordered ascendingly with respect to the number in the first list 
+
+def sort_string_list(list_1, list_2): 
+    pattern = r'\d+(\.\d+)?'
+    list_int = [int(re.search(pattern, text).group()) for text in list_1]
+
+    df_sort = pd.DataFrame({"int" : list_int, "output" : list_2, "filename" : list_1})
+    df_sort = df_sort.sort_values(by = "int", ascending=True)
+
+    return list(df_sort["filename"]), list(df_sort["output"])
+
+def gtif_to_array(gtif_file): # Convert a gtif file to an array
+    with rasterio.open(gtif_file, 'r') as f:
+        df = f.read(1)
+        arr = pd.DataFrame(df).to_numpy() 
+
+        return arr
 
 def fill_na(df): # Fill the nan values to apply correctly the filters. We fill the nan by the closest (euclidian) non nan value
     arr = df.to_numpy()
@@ -292,7 +345,7 @@ def nan_non_french_points(df, france):
     longitudes = np.linspace(lon_nw, lon_se, m) 
     lat_grid, lon_grid = np.meshgrid(latitudes, longitudes) # 2D version
 
-    # We use a GeoPandas object to compute if the coords is in France or not
+    # We use a GeoPandas object to compute if the coords are in France or not
     points = [Point(lon, lat) for lon, lat in zip(lon_grid.flatten(), lat_grid.flatten())]
     gdf = gpd.GeoDataFrame(geometry=points)
     gdf['in_france'] = gdf.geometry.within(france.geometry.iloc[0])
@@ -306,21 +359,21 @@ def nan_non_french_points(df, france):
     # The y-axis is upside down
     temp = df_filtered.to_numpy()
     flip = temp[::-1, :]
-    df_final = pd.DataFrame(flip, index = df_filtered.index, columns = df_filtered.columns)
+
+    df_final = pd.DataFrame(df_filtered, index = df_filtered.index, columns = df_filtered.columns)
 
     return df_final
 
 # Blur and spatially downsample all the samples
 def blur_and_spatial_downsampling(input_directory, output_directory, spatial_factor, filter = "mean", param_filter = 10):
     france = get_france_geo_points(spatial_factor, path_shp="Coméphore/Processing_input_data/filter_france")
-    
+    os.makedirs(output_directory, exist_ok=True)
+
     for filename in os.listdir(input_directory):
         print(f"Spatial processing : {filename}")
         with rasterio.open(os.path.join(input_directory, filename), 'r') as f:
             df = f.read(1)
             df = pd.DataFrame(df)
-
-            df = good_format(df)
 
             dico_filter = {"mean" : apply_mean_filter, "gaussian" : apply_gaussian_filter}
 
@@ -333,11 +386,13 @@ def blur_and_spatial_downsampling(input_directory, output_directory, spatial_fac
             downsampled_df = downsampling(conserved_df, spatial_factor)
 
             # Set to nan if not in france
-            
             fill_na_df = nan_non_french_points(downsampled_df, france)
-
+            
             meta = f.meta # Save the meta to copy on downsampled file
             meta.update(dtype=rasterio.float32, count=1, driver='GTiff') 
+            # Be careful, we must change the width & height given that we downsampled
+            meta["width"] = fill_na_df.shape[1]
+            meta["height"] = fill_na_df.shape[0]
 
             with rasterio.open(os.path.join(output_directory, filename), 'w', **meta) as dst: # Save the downsampling file
                 dst.write(fill_na_df.astype(rasterio.float32), 1)
@@ -372,9 +427,8 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
     live_key = 0 
     count = 0   # Reset when we put enough frames into a key
     for k in range(len(df_filename)):
-
         # Load the file and save it to the right key
-        with rasterio.open(os.path.join(input_directory, df_filename.iloc[k, "filename"])) as src:
+        with rasterio.open(os.path.join(input_directory, df_filename.iloc[k]["filename"])) as src:
             data = src.read(1)
             
             time_groups[f"Group {live_key}"].append(data)
@@ -385,17 +439,17 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
             count = 0
 
 
-    # Sum the files & save them
+    # Average the files & save them
     for time_period, rasters in time_groups.items():
         if rasters:  # If not empty (it should never be, except eventually the last one)
-            summed_raster = np.sum(rasters, axis=0)
+            summed_raster = np.mean(rasters, axis=0)
             
             # We put the date and hour range in the output filename
             output_filename = f"aggregated_sample_{time_period}.gtif"
             output_path = os.path.join(output_directory, output_filename)
 
             # We load any gtif to read and copy the metadata
-            with rasterio.open(df_filename.iloc[0, "filename"]) as src:
+            with rasterio.open(os.path.join(input_directory, df_filename.iloc[0]["filename"])) as src:
                 meta = src.meta
                 meta.update(dtype=rasterio.float32, count=1, driver='GTiff')  
                 

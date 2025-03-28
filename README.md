@@ -12,6 +12,6 @@ None of the data is stored in this repository, please specify the data path in t
 
 This repository includes two main folders, one for each dataset. Please keep in mind the preprocessing is mostly done on Coméphore, thus the CPC folder might not be up to date. 
 
-Each folder includes a "Simple baseline" for each target dataset, where are implemented two shallow models (bicubic interpolation & kNN). To run those models, compute different metrics and plot relevant figures, one can run the "automatisation_all_timestamps_master.py". <br>
-Relevant results are stored in the folder Images/, where each subfolder correspond to a timestamp. <br>
+Each folder includes a "Simple baseline" for each target dataset, where are implemented two shallow models (bicubic interpolation & kNN). To run those models, compute different metrics and plot relevant figures, one can run the "main.py". <br>
+Relevant results are stored in the folder Images, where each subfolder correspond to a timestamp. <br>
 

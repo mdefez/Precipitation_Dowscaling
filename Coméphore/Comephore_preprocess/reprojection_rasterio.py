@@ -38,7 +38,7 @@ dico_strategy = {comephore_crs : "no_epsg", epsg_2154 : "2154", epsg_9829 : "982
 strategy = dico_strategy[crs]
 
 # Only source data from this year will be projected
-year_to_reproject = 2020 
+year_to_reproject = 2023
 
 # Data are classified by month so we have to loop on them
 for k in range(1, 13): # Set to 13 to convert all the data, to 2 just to test on one
