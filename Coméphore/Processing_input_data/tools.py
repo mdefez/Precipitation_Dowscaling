@@ -99,6 +99,7 @@ def save_pdf(pdf, df, gtif_file, nb_hours = 1, title = None): # Save the df plot
 
 
 # This function sets to nan all the data that are not in France
+# Might be useless
 def filter_data_by_france(df, shapefile_path, spatial_factor):
 
     # This loads french borders with a slight margin (depending on the SR factor)
@@ -122,22 +123,19 @@ def filter_data_by_france(df, shapefile_path, spatial_factor):
     gdf['in_france'] = gdf.geometry.within(france_with_margin.geometry.iloc[0])
 
     # We set to NaN the non French coordinates
-    df_filtered = df.copy()
-    for k in range(len(gdf)):
-        if gdf.loc[k, "in_france"] == False:
-            df_filtered.loc[gdf.loc[k, "geometry"].y, gdf.loc[k, "geometry"].x] = np.nan
+    to_nan = gdf.loc[gdf["in_france"] == False, "geometry"]
+    lon_idx = to_nan.x.astype(float).tolist()
+    lat_idx = to_nan.y.astype(float).tolist()
 
-    # The y-axis is upside down
-    temp = df_filtered.to_numpy()
-    flip = temp[::-1, :]
-    df_final = pd.DataFrame(flip, index = df_filtered.index, columns = df_filtered.columns)
+    df.loc[lat_idx, lon_idx] = np.nan
 
-    return df_final
+    return df
 
-def good_format(df, divide = True): # Set df to the good format 
+def good_format(df, preprocess = False): # Set df to the good format 
 
-    # We replace the 65535 by NaN
-    df[df >= 65535] = np.nan
+    if preprocess: # Hide the fake values and transform values into mm
+        df[df >= 65535] = np.nan
+        df = df / 10
 
     # We replace the not french data by NaN (because it's fake measurements)
     df.index = df.index.astype(float)
@@ -149,11 +147,6 @@ def good_format(df, divide = True): # Set df to the good format
     df.loc[~mask_lignes, :] = np.nan 
     df.loc[:, ~mask_colonnes] = np.nan  
 
-
-    # We convert the values to mm
-    if divide == True:
-        df = df / 10
-
     return df 
 
 
@@ -164,56 +157,57 @@ def good_format(df, divide = True): # Set df to the good format
 # This function plot a frame from the gtif file
 # ONLY USE IT IF FOR HIGH RES
 # One can specify a path or a dataframe
-def plot_coméphore_high_res(gtif_file : Union[str, pd.DataFrame], output_folder, nb_hours = 1, title = None, divide = True):
+def plot_coméphore_high_res(gtif_file : Union[str, pd.DataFrame], output_folder, nb_hours = 1, title = None, preprocess = False):
     if isinstance(gtif_file, str):
         with rasterio.open(gtif_file, 'r') as f:
             df = f.read(1)
             df = pd.DataFrame(df)
-
-            df = good_format(df, divide)
-
+            
+            df = good_format(df, preprocess)
     
             plot(df, gtif_file, output_folder, nb_hours, title)
     
     else:
-        df = good_format(gtif_file, divide)
+        df = good_format(gtif_file, preprocess)
 
         plot(df, "", output_folder, nb_hours, title=title)
 
-def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1, title = None, divide = True):
+
+
+def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1, title = None):
     if isinstance(gtif_file, str):
         with rasterio.open(gtif_file, 'r') as f:
             df = f.read(1)
             df = pd.DataFrame(df)
-            df = good_format(df, divide)
+            df = good_format(df)
     
             save_pdf(pdf, df, gtif_file, nb_hours, title)
     else:
-        df = good_format(gtif_file, divide)
+        df = good_format(gtif_file)
 
         save_pdf(pdf, df, "", nb_hours, title = title)
 
 # This function plot a frame from the gtif file
 # ONLY USE IT IF FOR CUSTOM RES (it's longer to compute)
 # It only plot the data and filter it to the franch borders
-def plot_coméphore_low_res(gtif_file : Union[str, pd.DataFrame], output_folder, spatial_factor = 30, nb_hours = 1, title = None, divide = True):
+def plot_coméphore_low_res(gtif_file : Union[str, pd.DataFrame], output_folder, spatial_factor = 30, nb_hours = 1, title = None):
     if isinstance(gtif_file, str):
         with rasterio.open(gtif_file, 'r') as f:
             df = f.read(1)
             df = pd.DataFrame(df)
 
-            fill_na_df = filter_data_by_france(df, "Coméphore/Processing_input_data/filter_france", spatial_factor)
+            # fill_na_df = filter_data_by_france(df, "Coméphore/Processing_input_data/filter_france", spatial_factor)
 
-            plot(fill_na_df, gtif_file, output_folder, nb_hours, title)
+            plot(df, gtif_file, output_folder, nb_hours, title)
     
     else:
-        fill_na_df = filter_data_by_france(gtif_file, "Coméphore/Processing_input_data/filter_france", spatial_factor)
+        # fill_na_df = filter_data_by_france(gtif_file, "Coméphore/Processing_input_data/filter_france", spatial_factor)
 
-        plot(fill_na_df, "", output_folder, nb_hours, title = title)
+        plot(gtif_file, "", output_folder, nb_hours, title = title)
 
 
 
-def save_pdf_coméphore_low_res(pdf, gtif_file, spatial_factor = 30, nb_hours = 1, title = None, divide = True):
+def save_pdf_coméphore_low_res(pdf, gtif_file, spatial_factor = 30, nb_hours = 1, title = None):
     if isinstance(gtif_file, str):
         with rasterio.open(gtif_file, 'r') as f:
             df = f.read(1)
@@ -258,6 +252,7 @@ def gtif_to_array(gtif_file): # Convert a gtif file to an array
         return arr
 
 def fill_na(df): # Fill the nan values to apply correctly the filters. We fill the nan by the closest (euclidian) non nan value
+    
     arr = df.to_numpy()
 
     x, y = np.indices(arr.shape)
@@ -271,10 +266,18 @@ def fill_na(df): # Fill the nan values to apply correctly the filters. We fill t
 
     return pd.DataFrame(arr_filled, index = df.index, columns = df.columns)
 
-def apply_gaussian_filter(df, sigma):
-    df_filtered = pd.DataFrame(gaussian_filter(df, sigma=sigma), columns=df.columns)
+def fill_na_arr(arr): # Same thing from array to array
 
-    return df_filtered
+    x, y = np.indices(arr.shape)
+    mask = ~np.isnan(arr)
+
+    x_valid = x[mask]
+    y_valid = y[mask]
+    values_valid = arr[mask]
+
+    arr_filled = griddata((x_valid, y_valid), values_valid, (x, y), method='nearest')
+
+    return arr_filled
 
 def apply_mean_filter(df, kernel_size):
     # We keep in memory the nan values before applying the kernel
@@ -289,13 +292,6 @@ def apply_mean_filter(df, kernel_size):
 
     return df_filtered
 
-def conserving_mass(df_input, df_output):
-    # We compute the total of precipitation (the mass) before & after the transformation to make sure it's the same
-    mass_before = float(df_input.sum().sum())
-    mass_after = float(df_output.sum().sum())
-
-    return df_output * mass_before / mass_after
-
 def downsampling(df, factor):
     # We fill the nan 
     fill_df = fill_na(df)
@@ -303,12 +299,14 @@ def downsampling(df, factor):
     arr = fill_df.to_numpy()
 
     # Downsample
-    arr_reshaped = arr[:arr.shape[0] // factor * factor, :arr.shape[1] // factor * factor].reshape(
-        arr.shape[0] // factor, factor, arr.shape[1] // factor, factor
-    )
+    new_shape = (arr.shape[0] // factor * factor, arr.shape[1] // factor * factor)
 
-    arr_downsampled = arr_reshaped.mean(axis=(1, 3))
+    # Tronquer l'array aux dimensions ajustées
+    arr_downsampled = arr[:new_shape[0], :new_shape[1]]
 
+    # Reshape et calcul de la moyenne
+    arr_downsampled = arr_downsampled.reshape(new_shape[0] // factor, factor, new_shape[1] // factor, factor).mean(axis=(1, 3))
+  
     # To compute the new coords
     lat_nw, lon_nw = 54.184031134174326, -9.965  # Coin nord-ouest (latitude, longitude)
     lat_se, lon_se = 39.4626295723437, 14.563084827903268  # Coin sud-est (latitude, longitude)
@@ -333,14 +331,13 @@ def get_france_geo_points(spatial_factor, path_shp = "Coméphore/Processing_inpu
 
     return france_with_margin
 
-# This function sets to nan the points in the df outside of the France's borders
-# The point of doing 2 functions is to not reload the world map at each file
-def nan_non_french_points(df, france):
+# This function stores the point coordinates we need to nan 
+def nan_non_french_points(shape, france):
     # Get the lat/lon of all our points
     lat_nw, lon_nw = 54.184031134174326, -9.965  # Nord West
     lat_se, lon_se = 39.4626295723437, 14.563084827903268  # Sud East
 
-    n, m = df.shape 
+    n, m = shape
     latitudes = np.linspace(lat_se, lat_nw, n)
     longitudes = np.linspace(lon_nw, lon_se, m) 
     lat_grid, lon_grid = np.meshgrid(latitudes, longitudes) # 2D version
@@ -350,44 +347,60 @@ def nan_non_french_points(df, france):
     gdf = gpd.GeoDataFrame(geometry=points)
     gdf['in_france'] = gdf.geometry.within(france.geometry.iloc[0])
 
-    # We set to NaN the non French coordinates
-    df_filtered = df.copy()
-    for k in range(len(gdf)):
-        if gdf.loc[k, "in_france"] == False:
-            df_filtered.loc[gdf.loc[k, "geometry"].y, gdf.loc[k, "geometry"].x] = np.nan
+    # We store the non French coordinates
+    to_nan = gdf.loc[gdf["in_france"] == False, "geometry"]
 
-    # The y-axis is upside down
-    temp = df_filtered.to_numpy()
-    flip = temp[::-1, :]
+    return to_nan
 
-    df_final = pd.DataFrame(df_filtered, index = df_filtered.index, columns = df_filtered.columns)
+# This function sets to nan the given coordinates
+# The point of doing multiple functions is to not compute the coordinates to nan for each file (they don't change)
+def set_to_nan(df, list_nan):
+    n = df.shape[0]
+    for nan in list_nan:
+        lon = nan.x 
+        lat = nan.y 
 
-    return df_final
+        lat_to_nan = n-1 - df.index.get_loc(lat)# For some reason the France map from GDO is upside down
+
+        df.iloc[lat_to_nan][lon] = np.nan
+
+    return pd.DataFrame(df, index=df.index, columns=df.columns)
 
 # Blur and spatially downsample all the samples
-def blur_and_spatial_downsampling(input_directory, output_directory, spatial_factor, filter = "mean", param_filter = 10):
+def blur_and_spatial_downsampling(input_directory, output_directory, spatial_factor):
     france = get_france_geo_points(spatial_factor, path_shp="Coméphore/Processing_input_data/filter_france")
     os.makedirs(output_directory, exist_ok=True)
 
-    for filename in os.listdir(input_directory):
-        print(f"Spatial processing : {filename}")
+    # We sort the folder so that the function deals with file accordingly to the timestep it represents
+    list_dir = os.listdir(input_directory)
+    pattern = r'\d+(\.\d+)?'
+    list_int = [int(re.search(pattern, text).group()) for text in list_dir]
+
+    df_sort = pd.DataFrame({"int" : list_int, "filename" : list_dir})
+    df_sort = df_sort.sort_values(by = "int", ascending=True)
+
+    list_dir_sorted = list(df_sort["filename"])
+    
+    # Get the new shape of the df
+    with rasterio.open(os.path.join(input_directory, list_dir_sorted[0]), 'r') as f:
+        df = f.read(1)
+        df = pd.DataFrame(df)
+        shape = df.shape
+
+    # Compute the points to set to nan given the new shape
+    to_nan = nan_non_french_points(shape, france)
+
+    for filename in list_dir_sorted:
+        print(f"Spatial processing file : {filename}")
         with rasterio.open(os.path.join(input_directory, filename), 'r') as f:
             df = f.read(1)
             df = pd.DataFrame(df)
-
-            dico_filter = {"mean" : apply_mean_filter, "gaussian" : apply_gaussian_filter}
-
-            filtered_df = dico_filter[filter](df, param_filter)
-
-            # Conservating the mass (naïve conservative regridding)
-            conserved_df = conserving_mass(df_input = df, df_output = filtered_df)
-
             # Downsampling with respect to the specified factor
-            downsampled_df = downsampling(conserved_df, spatial_factor)
+            downsampled_df = downsampling(df, spatial_factor)
 
             # Set to nan if not in france
-            fill_na_df = nan_non_french_points(downsampled_df, france)
-            
+            fill_na_df = set_to_nan(downsampled_df, to_nan)
+
             meta = f.meta # Save the meta to copy on downsampled file
             meta.update(dtype=rasterio.float32, count=1, driver='GTiff') 
             # Be careful, we must change the width & height given that we downsampled
@@ -417,7 +430,7 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
 
     df_filename = pd.DataFrame({"filename" : liste_filename, "timestep" : liste_timestep})
 
-    # Sort the df according to the timestep, luckily, increasing the timestep actually corresponds to move forward in time
+    # Sort the df according to the timestep, luckily, increasing the timestep actually corresponds to move forward in time given the format file
     df_filename = df_filename.sort_values(by = "timestep", ascending=True)
 
 
@@ -429,8 +442,14 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
     for k in range(len(df_filename)):
         # Load the file and save it to the right key
         with rasterio.open(os.path.join(input_directory, df_filename.iloc[k]["filename"])) as src:
-            data = src.read(1)
-            
+            data = np.array(src.read(1))
+
+            # Fill the fake value by nan
+            data = np.where(data >= 65535, np.nan, data)
+
+            # We divide by 10 to have mm
+            data = data / 10
+
             time_groups[f"Group {live_key}"].append(data)
         count += 1
 
@@ -457,7 +476,7 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
                 with rasterio.open(output_path, 'w', **meta) as dst:
                     dst.write(summed_raster.astype(rasterio.float32), 1)
 
-                print(f"Uploaded file : {output_filename}")
+                print(f"Temporal processing file : {output_filename}")
 
 
 
@@ -470,9 +489,7 @@ def process_input(input_folder, interm_folder, output_folder, temp_factor, spati
 
     blur_and_spatial_downsampling(input_directory= interm_folder,
                                   output_directory=output_folder,
-                                  spatial_factor=spatial_factor,
-                                  filter="mean",
-                                  param_filter=10) # blurring and spatial downsampling, saving the results in the output folder
+                                  spatial_factor=spatial_factor) # blurring and spatial downsampling, saving the results in the output folder
 
 
 

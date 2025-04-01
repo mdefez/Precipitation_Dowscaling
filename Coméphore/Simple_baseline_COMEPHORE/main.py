@@ -11,8 +11,6 @@ sys.path.append(os.path.join(os.getcwd(), "Coméphore/Processing_input_data"))
 sys.path.append(os.path.join(os.getcwd(), "Coméphore/Simple_baseline_COMEPHORE"))
 import tools as tool
 import functions as fun
-import rasterio
-import pandas as pd
 
 # Here you can tune the hyperparameter
 temp_factor = 6
@@ -27,10 +25,13 @@ temporal_downscaled_data_path = "../../../downscaling/mdefez/Comephore/test_base
 # Where to store the final processed data
 input_data = "../../../downscaling/mdefez/Comephore/test_baseline/input_data"
 
+# tool.plot_coméphore_low_res(input_data + '/aggregated_sample_Group 14.gtif', os.getcwd(), title = "test")
+
+
 ##############################################################################################################################
 ### First step : Process the data to create the inputs (blurring & downsampling)
 ##############################################################################################################################
-data_already_processed = False 
+data_already_processed = True 
 if not data_already_processed:
     tool.process_input(input_folder = original_data_path, 
                     interm_folder = temporal_downscaled_data_path,
@@ -68,14 +69,14 @@ target_size = (1294, 2156) # high res of the Coméphore dataset
 # method = fun.nearest_neighbor
 method = fun.bicubic_interpolation
 
-list_output = [method(arr, target_size) for arr in time_sr]
+list_output = [method(arr, target_size) for arr in time_sr][:10] # To compute only 10 outputs
 
 
 ##############################################################################################################################
 ### Third step : Computing the metrics and eventually plot some samples
 ##############################################################################################################################
 
-# Get the target data 
+# Get the target data in a array format
 list_filename_target = [os.path.join(original_data_path, gtif_file).split("/")[-1] for gtif_file in os.listdir(original_data_path)]
 list_target = [tool.gtif_to_array(os.path.join(original_data_path, gtif_file)) for gtif_file in os.listdir(original_data_path)]
 
@@ -87,7 +88,9 @@ list_filename_target, list_target = tool.sort_string_list(list_filename_target, 
 for sample in range(7):
     fun.plot_pred_truth(pred = list_output[sample], 
                         target = list_target[sample], filename = list_filename_target[sample],
-                        output_folder = "Coméphore/Simple_baseline_COMEPHORE/test_result")
+                        output_folder = "Coméphore/Simple_baseline_COMEPHORE/test_result",
+                        spatial_factor=spatial_factor,
+                        temp_factor=temp_factor)
 
 
 

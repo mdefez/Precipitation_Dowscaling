@@ -23,7 +23,10 @@ import tools as tool
 
 # Spatial bicubic interpolation
 def bicubic_interpolation(arr, target_size): # target size en (ligne, colonne) 
-    return cv2.resize(arr, (target_size[1], target_size[0]), interpolation=cv2.INTER_CUBIC)
+    arr = tool.fill_na_arr(arr) # We fillna as a padding method (that's mirror padding basically)
+    arr_augmented = cv2.resize(arr, (target_size[1], target_size[0]), interpolation=cv2.INTER_CUBIC)
+
+    return arr_augmented
     
 # Spatial nearest neighbor interpolation
 def nearest_neighbor(arr, target_size): # Apply the one nearest neighbor
@@ -139,17 +142,17 @@ def métrique(pred_ini : np.ndarray, target : np.ndarray, timestep):
 
 
 # Plot the prediction vs the ground truth
-def plot_pred_truth(pred : np.ndarray, target : np.ndarray, filename, output_folder):
+def plot_pred_truth(pred : np.ndarray, target : np.ndarray, filename, output_folder, spatial_factor, temp_factor):
+
     timestep = filename.split("/")[-1][10:20]
-    title_pred = f"Prediction {timestep}"
+    title_pred = f"Prediction {timestep}\nSpatial SR factor : {spatial_factor} km\nTemporal SR factor : {temp_factor} hours"
     title_target = f"Ground truth {timestep}"
 
     pred = pd.DataFrame(pred)
-    #tool.plot(pred, "", output_folder, title = title_pred)
-    tool.plot_coméphore_high_res(pred, output_folder, title = title_pred, divide = False)
+    tool.plot_coméphore_high_res(pred, output_folder, title = title_pred)
 
     target = pd.DataFrame(target)
-    tool.plot_coméphore_high_res(target, output_folder, title = title_target)
+    tool.plot_coméphore_high_res(target, output_folder, title = title_target, preprocess = True)
 
 
 

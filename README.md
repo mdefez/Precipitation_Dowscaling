@@ -2,7 +2,7 @@
 
 The goal of this project is to apply Video Super-Resolution algorithm to precipitation data.
 
-We work with two different datasets, covering different but not exclusive areas, both have 1km and 1hour resolution : the first is the CombiPrecip dataset, the second is the Compéhore dataset, which respectively cover the France and Switzerland area.
+We work with two different datasets, covering different but not exclusive areas, both have 1km and 1hour resolution : the first is the CombiPrecip dataset, the second is the Coméphore dataset, which respectively cover the France and Switzerland area.
 
 Both datasets will be used as input & target :
 - The target will be the data as itself
