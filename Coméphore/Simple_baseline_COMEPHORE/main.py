@@ -44,54 +44,45 @@ if not data_already_processed:
 ##############################################################################################################################
 # The predictions will be stored as array in a list (sorted by time)
 
-# Save the input to array 
-list_filename = [os.path.join(input_data, gtif_file) for gtif_file in os.listdir(input_data)]
-list_input_low_temporal_res = [tool.gtif_to_array(os.path.join(input_data, gtif_file)) for gtif_file in os.listdir(input_data)]
+# Import the input into a (sorted) list of arrays
+list_filename_input, list_input_low_temporal_res = fun.get_array_sorted_by_time(input_data)
 
-# Sort the list with respect to time
-list_filename, list_input_low_temporal_res = tool.sort_string_list(list_filename, list_input_low_temporal_res)
+################# Temporally super resolve ################################
+temporal_method = {fun.temporal_interpolation} # Available time super resolving method
 
-# Temporally super resolve
-time_sr = []
-for k in range(len(list_input_low_temporal_res)-1):
-    augmented_data = fun.temporal_interpolation(list_input_low_temporal_res[k], 
-                                                list_input_low_temporal_res[k+1], 
-                                                temp_factor = temp_factor)
-    for arr in augmented_data:
-        time_sr.append(arr)
+time_sr = fun.temporal_super_resolve(list_input_low_temporal_res = list_input_low_temporal_res,
+                                     temp_factor = temp_factor,
+                                     method = fun.temporal_interpolation)
 
 
 # We now have a list of arrays with a 1 hour temporal resolution
-# Spatially super resolve 
+
+################# Spatially super resolve ################################
 target_size = (1294, 2156) # high res of the Coméphore dataset
 
-# Choose one out of two method
-# method = fun.nearest_neighbor
-method = fun.bicubic_interpolation
+# Choose an avaiable space super resolving method between them
+spatial_method = {fun.bicubic_interpolation, fun.nearest_neighbor}
 
-list_output = [method(arr, target_size) for arr in time_sr][:10] # To compute only 10 outputs
+nb_files_to_downsample = 10 # We compute some samples to visualize the results
+list_output = [fun.bicubic_interpolation(arr, target_size) for arr in time_sr][:nb_files_to_downsample] 
 
 
 ##############################################################################################################################
 ### Third step : Computing the metrics and eventually plot some samples
 ##############################################################################################################################
 
-# Get the target data in a array format
-list_filename_target = [os.path.join(original_data_path, gtif_file).split("/")[-1] for gtif_file in os.listdir(original_data_path)]
-list_target = [tool.gtif_to_array(os.path.join(original_data_path, gtif_file)) for gtif_file in os.listdir(original_data_path)]
-
-# Sort the list with respect to time
-list_filename_target, list_target = tool.sort_string_list(list_filename_target, list_target)
+# Get the target data in a array format & sort the list with respect to timesteps in the filename
+list_filename_target, list_target = fun.get_array_sorted_by_time(original_data_path)
 
 
-# Plot an example
-for sample in range(7):
-    fun.plot_pred_truth(pred = list_output[sample], 
-                        target = list_target[sample], filename = list_filename_target[sample],
-                        output_folder = "Coméphore/Simple_baseline_COMEPHORE/test_result",
-                        spatial_factor=spatial_factor,
+# Plot the computed examples
+fun.plot_all_examples(nb_files=nb_files_to_downsample,
+                      list_pred=list_output,
+                      list_target=list_target,
+                      list_filename=list_filename_target,
+                      output_folder="Coméphore/Simple_baseline_COMEPHORE/plot_result",
+                      spatial_factor=spatial_factor,
                         temp_factor=temp_factor)
-
 
 
 

@@ -1,5 +1,6 @@
 # This file aims to store useful functions for the simplebaseline pipeline
 
+from ast import Call
 from os import times
 from turtle import title
 import pandas as pd
@@ -12,13 +13,29 @@ from scipy.stats import wasserstein_distance
 from scipy.stats import ks_2samp
 import sys 
 import os
+from typing import Callable
 
 sys.path.append(os.path.join(os.getcwd(), "Coméphore/Processing_input_data"))
 import tools as tool
 
+################################################################################################################################
+######################## PART 1 : Utility functions ###################################################################
+################################################################################################################################
+
+# This function takes a folder in argument (containing gtif files)
+# It transforms the files to array returns a list of those arrays
+# The list is sorted (ascendigly) by time, which means the first item is the array corresponding to the first timestep
+def get_array_sorted_by_time(folder_gtif_file):
+    list_filename = [gtif_file for gtif_file in os.listdir(folder_gtif_file)] # Get the list of the filenames
+    list_array = [tool.gtif_to_array(os.path.join(folder_gtif_file, gtif_file)) for gtif_file in os.listdir(folder_gtif_file)] # Get the list of the corresponding array
+
+    # Sort the list with respect to time
+    list_filename, list_array = tool.sort_string_list(list_filename, list_array) # Sort both list according to the timestep in the filename
+
+    return list_filename, list_array
 
 ################################################################################################################################
-######################## PART 1 : SUPER RESOLUTION FUNCTIONS ###################################################################
+######################## PART 2 : SUPER RESOLUTION FUNCTIONS ###################################################################
 ################################################################################################################################
 
 # Spatial bicubic interpolation
@@ -40,7 +57,19 @@ def nearest_neighbor(arr, target_size): # Apply the one nearest neighbor
 # It then returns a list of all the intermediate array, including the first one ( not hte second otherwise it will be represented 2 times)
 def temporal_interpolation(array_1, array_2, temp_factor):
         return [(array_1 * (temp_factor - i) / temp_factor + array_2 * i / temp_factor) for i in range(temp_factor)]
-        
+
+# This function super resolves the folder into the specified temporal SR factor according to a method
+def temporal_super_resolve(list_input_low_temporal_res, temp_factor, method : Callable):
+    time_sr = [] # Stores the final SR frames
+
+    for k in range(len(list_input_low_temporal_res)-1): # Compute every low res frame according to the method
+        augmented_data = method(list_input_low_temporal_res[k], 
+                                                    list_input_low_temporal_res[k+1], 
+                                                    temp_factor = temp_factor)
+        for arr in augmented_data:
+            time_sr.append(arr)
+
+    return time_sr
 
 
 
@@ -144,16 +173,23 @@ def métrique(pred_ini : np.ndarray, target : np.ndarray, timestep):
 # Plot the prediction vs the ground truth
 def plot_pred_truth(pred : np.ndarray, target : np.ndarray, filename, output_folder, spatial_factor, temp_factor):
 
-    timestep = filename.split("/")[-1][10:20]
+    timestep = filename[10:20]
     title_pred = f"Prediction {timestep}\nSpatial SR factor : {spatial_factor} km\nTemporal SR factor : {temp_factor} hours"
     title_target = f"Ground truth {timestep}"
 
     pred = pd.DataFrame(pred)
-    tool.plot_coméphore_high_res(pred, output_folder, title = title_pred)
+    tool.plot_coméphore_high_res(pred, output_folder + "/predictions", title = title_pred)
 
     target = pd.DataFrame(target)
-    tool.plot_coméphore_high_res(target, output_folder, title = title_target, preprocess = True)
+    tool.plot_coméphore_high_res(target, output_folder + "/target", title = title_target, preprocess = True)
 
+def plot_all_examples(nb_files, list_pred, list_target, list_filename, output_folder, spatial_factor, temp_factor):
+    for sample in range(nb_files):
+        plot_pred_truth(pred = list_pred[sample], 
+                        target = list_target[sample], filename = list_filename[sample],
+                        output_folder = output_folder,
+                        spatial_factor=spatial_factor,
+                        temp_factor=temp_factor)
 
 
 

@@ -98,39 +98,6 @@ def save_pdf(pdf, df, gtif_file, nb_hours = 1, title = None): # Save the df plot
     plt.close()
 
 
-# This function sets to nan all the data that are not in France
-# Might be useless
-def filter_data_by_france(df, shapefile_path, spatial_factor):
-
-    # This loads french borders with a slight margin (depending on the SR factor)
-    world = gpd.read_file(shapefile_path)
-    france = world[world["NAME_FR"] == 'France']
-    france = france.to_crs(epsg=2154)
-    france_with_margin = france.geometry.buffer(spatial_factor*1000/3) 
-    france_with_margin = france_with_margin.to_crs(epsg=4326)
-
-    # Get the lat/lon of all our points
-    lat_nw, lon_nw = 54.184031134174326, -9.965  # Nord West
-    lat_se, lon_se = 39.4626295723437, 14.563084827903268  # Sud East
-    n, m = df.shape 
-    latitudes = np.linspace(lat_se, lat_nw, n)
-    longitudes = np.linspace(lon_nw, lon_se, m) 
-    lat_grid, lon_grid = np.meshgrid(latitudes, longitudes) # 2D version
-
-    # We use a GeoPandas object to compute if the coords is in France or not
-    points = [Point(lon, lat) for lon, lat in zip(lon_grid.flatten(), lat_grid.flatten())]
-    gdf = gpd.GeoDataFrame(geometry=points)
-    gdf['in_france'] = gdf.geometry.within(france_with_margin.geometry.iloc[0])
-
-    # We set to NaN the non French coordinates
-    to_nan = gdf.loc[gdf["in_france"] == False, "geometry"]
-    lon_idx = to_nan.x.astype(float).tolist()
-    lat_idx = to_nan.y.astype(float).tolist()
-
-    df.loc[lat_idx, lon_idx] = np.nan
-
-    return df
-
 def good_format(df, preprocess = False): # Set df to the good format 
 
     if preprocess: # Hide the fake values and transform values into mm
@@ -164,17 +131,15 @@ def plot_coméphore_high_res(gtif_file : Union[str, pd.DataFrame], output_folder
             df = pd.DataFrame(df)
             
             df = good_format(df, preprocess)
-    
             plot(df, gtif_file, output_folder, nb_hours, title)
     
     else:
         df = good_format(gtif_file, preprocess)
-
         plot(df, "", output_folder, nb_hours, title=title)
 
 
 
-def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1, title = None):
+def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1, title = None, preprocess = False):
     if isinstance(gtif_file, str):
         with rasterio.open(gtif_file, 'r') as f:
             df = f.read(1)
@@ -183,8 +148,7 @@ def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1, title = None):
     
             save_pdf(pdf, df, gtif_file, nb_hours, title)
     else:
-        df = good_format(gtif_file)
-
+        df = good_format(gtif_file, preprocess)
         save_pdf(pdf, df, "", nb_hours, title = title)
 
 # This function plot a frame from the gtif file
@@ -196,13 +160,9 @@ def plot_coméphore_low_res(gtif_file : Union[str, pd.DataFrame], output_folder,
             df = f.read(1)
             df = pd.DataFrame(df)
 
-            # fill_na_df = filter_data_by_france(df, "Coméphore/Processing_input_data/filter_france", spatial_factor)
-
             plot(df, gtif_file, output_folder, nb_hours, title)
     
     else:
-        # fill_na_df = filter_data_by_france(gtif_file, "Coméphore/Processing_input_data/filter_france", spatial_factor)
-
         plot(gtif_file, "", output_folder, nb_hours, title = title)
 
 
@@ -213,14 +173,10 @@ def save_pdf_coméphore_low_res(pdf, gtif_file, spatial_factor = 30, nb_hours = 
             df = f.read(1)
             df = pd.DataFrame(df)
 
-            fill_na_df = filter_data_by_france(df, "Coméphore/Processing_input_data/filter_france", spatial_factor)
-
-            save_pdf(pdf, fill_na_df, gtif_file, nb_hours, title)
+            save_pdf(pdf, df, gtif_file, nb_hours, title)
 
     else:
-        fill_na_df = filter_data_by_france(gtif_file, "Coméphore/Processing_input_data/filter_france", spatial_factor)
-
-        save_pdf(pdf, fill_na_df, "", nb_hours, title = title)
+        save_pdf(pdf, gtif_file, "", nb_hours, title = title)
 
 
 #################################################################################################################################
