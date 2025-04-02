@@ -1,13 +1,15 @@
 # This file stores useful functions concerning the Coméphore dataset
 
 from array import array
+from datetime import time
 from turtle import down
 import pandas as pd
 import numpy as np
 import os
+import warnings
 import re
 from typing import Union
-from scipy.ndimage import gaussian_filter, uniform_filter
+from scipy.ndimage import gaussian_filter, uniform_filter, distance_transform_edt
 import rasterio
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
@@ -154,7 +156,7 @@ def save_pdf_coméphore_high_res(pdf, gtif_file, nb_hours = 1, title = None, pre
 # This function plot a frame from the gtif file
 # ONLY USE IT IF FOR CUSTOM RES (it's longer to compute)
 # It only plot the data and filter it to the franch borders
-def plot_coméphore_low_res(gtif_file : Union[str, pd.DataFrame], output_folder, spatial_factor = 30, nb_hours = 1, title = None):
+def plot_coméphore_low_res(gtif_file : Union[str, pd.DataFrame], output_folder, nb_hours = 1, title = None):
     if isinstance(gtif_file, str):
         with rasterio.open(gtif_file, 'r') as f:
             df = f.read(1)
@@ -167,7 +169,7 @@ def plot_coméphore_low_res(gtif_file : Union[str, pd.DataFrame], output_folder,
 
 
 
-def save_pdf_coméphore_low_res(pdf, gtif_file, spatial_factor = 30, nb_hours = 1, title = None):
+def save_pdf_coméphore_low_res(pdf, gtif_file, nb_hours = 1, title = None):
     if isinstance(gtif_file, str):
         with rasterio.open(gtif_file, 'r') as f:
             df = f.read(1)
@@ -207,33 +209,37 @@ def gtif_to_array(gtif_file): # Convert a gtif file to an array
 
         return arr
 
+def fill_na_arr(arr, margin = 6):
+    x, y = np.indices(arr.shape)
+    mask = ~np.isnan(arr)
+
+    # For each nan, compute the distance to the closest non nan
+    distances = distance_transform_edt(np.isnan(arr))
+
+    arr_filled = arr.copy()
+
+    # Keep the nan close enough 
+    nan_x, nan_y = np.where(np.isnan(arr) & (distances <= margin))
+
+    # Set the value to the corresponding closest value
+    if nan_x.size > 0:
+        x_valid = x[mask]
+        y_valid = y[mask]
+        values_valid = arr[mask]
+
+        interpolated_values = griddata((x_valid, y_valid), values_valid, (nan_x, nan_y), method='nearest')
+        arr_filled[nan_x, nan_y] = interpolated_values
+
+    return arr_filled
+
 def fill_na(df): # Fill the nan values to apply correctly the filters. We fill the nan by the closest (euclidian) non nan value
     
     arr = df.to_numpy()
 
-    x, y = np.indices(arr.shape)
-    mask = ~np.isnan(arr)
-
-    x_valid = x[mask]
-    y_valid = y[mask]
-    values_valid = arr[mask]
-
-    arr_filled = griddata((x_valid, y_valid), values_valid, (x, y), method='nearest')
+    arr_filled = fill_na_arr(arr)
 
     return pd.DataFrame(arr_filled, index = df.index, columns = df.columns)
 
-def fill_na_arr(arr): # Same thing from array to array
-
-    x, y = np.indices(arr.shape)
-    mask = ~np.isnan(arr)
-
-    x_valid = x[mask]
-    y_valid = y[mask]
-    values_valid = arr[mask]
-
-    arr_filled = griddata((x_valid, y_valid), values_valid, (x, y), method='nearest')
-
-    return arr_filled
 
 def apply_mean_filter(df, kernel_size):
     # We keep in memory the nan values before applying the kernel
@@ -249,10 +255,10 @@ def apply_mean_filter(df, kernel_size):
     return df_filtered
 
 def downsampling(df, factor):
-    # We fill the nan 
-    fill_df = fill_na(df)
+    arr = df.to_numpy()
 
-    arr = fill_df.to_numpy()
+    # We fill the nan 
+    arr = fill_na_arr(arr)
 
     # Downsample
     new_shape = (arr.shape[0] // factor * factor, arr.shape[1] // factor * factor)
@@ -317,8 +323,11 @@ def set_to_nan(df, list_nan):
         lat = nan.y 
 
         lat_to_nan = n-1 - df.index.get_loc(lat)# For some reason the France map from GDO is upside down
-
+        
+        warnings.filterwarnings("ignore", category=FutureWarning)
         df.iloc[lat_to_nan][lon] = np.nan
+        warnings.resetwarnings() 
+        
 
     return pd.DataFrame(df, index=df.index, columns=df.columns)
 
@@ -336,23 +345,20 @@ def blur_and_spatial_downsampling(input_directory, output_directory, spatial_fac
     df_sort = df_sort.sort_values(by = "int", ascending=True)
 
     list_dir_sorted = list(df_sort["filename"])
-    
-    # Get the new shape of the df
-    with rasterio.open(os.path.join(input_directory, list_dir_sorted[0]), 'r') as f:
-        df = f.read(1)
-        df = pd.DataFrame(df)
-        shape = df.shape
-
-    # Compute the points to set to nan given the new shape
-    to_nan = nan_non_french_points(shape, france)
 
     for filename in list_dir_sorted:
-        print(f"Spatial processing file : {filename}")
+        output_name = f"{filename[:-5]}_spatial_factor_{spatial_factor}.gtif"
+        print(f"Spatial processing file : {output_name}")
         with rasterio.open(os.path.join(input_directory, filename), 'r') as f:
             df = f.read(1)
             df = pd.DataFrame(df)
             # Downsampling with respect to the specified factor
             downsampled_df = downsampling(df, spatial_factor)
+
+            if filename == list_dir_sorted[0]: # We compute it once
+                low_res = downsampled_df.shape
+                # Compute the points to set to nan given the new shape
+                to_nan = nan_non_french_points(low_res, france)
 
             # Set to nan if not in france
             fill_na_df = set_to_nan(downsampled_df, to_nan)
@@ -363,7 +369,7 @@ def blur_and_spatial_downsampling(input_directory, output_directory, spatial_fac
             meta["width"] = fill_na_df.shape[1]
             meta["height"] = fill_na_df.shape[0]
 
-            with rasterio.open(os.path.join(output_directory, filename), 'w', **meta) as dst: # Save the downsampling file
+            with rasterio.open(os.path.join(output_directory, output_name), 'w', **meta) as dst: # Save the downsampling file
                 dst.write(fill_na_df.astype(rasterio.float32), 1)
 
 # This function takes as input a folder where remain the samples we want to aggregate, the temporal factor to use
@@ -371,13 +377,9 @@ def blur_and_spatial_downsampling(input_directory, output_directory, spatial_fac
 def temporal_downsampling(input_directory, output_directory, temp_factor):
 
     os.makedirs(output_directory, exist_ok=True)
-    n_inputs = len(os.listdir(input_directory))
 
     # Dictionnary to store the groupped files
     time_groups = {}
-    
-    for k in range(int(n_inputs / temp_factor) + 1):
-        time_groups[f"Group {k}"] = []
     
     # Creating a df with the filename and the corresponding timestep
 
@@ -406,7 +408,12 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
             # We divide by 10 to have mm
             data = data / 10
 
-            time_groups[f"Group {live_key}"].append(data)
+            # If the list does not exist yet
+            if count == 0:
+                timestep_name = df_filename.iloc[k]["timestep"]
+                time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"] = []
+
+            time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"].append(data)
         count += 1
 
         if count == temp_factor:
@@ -415,24 +422,25 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
 
 
     # Average the files & save them
-    for time_period, rasters in time_groups.items():
-        if rasters:  # If not empty (it should never be, except eventually the last one)
-            summed_raster = np.mean(rasters, axis=0)
+    for name in time_groups.keys():
+        rasters = time_groups[name]
+
+        summed_raster = np.mean(rasters, axis=0)
+        
+        # We put the date and hour range in the output filename
+        output_filename = f"{name}.gtif"
+        output_path = os.path.join(output_directory, output_filename)
+
+        # We load any gtif to read and copy the metadata
+        with rasterio.open(os.path.join(input_directory, df_filename.iloc[0]["filename"])) as src:
+            meta = src.meta
+            meta.update(dtype=rasterio.float32, count=1, driver='GTiff')  
             
-            # We put the date and hour range in the output filename
-            output_filename = f"aggregated_sample_{time_period}.gtif"
-            output_path = os.path.join(output_directory, output_filename)
+            # Save the aggregated file
+            with rasterio.open(output_path, 'w', **meta) as dst:
+                dst.write(summed_raster.astype(rasterio.float32), 1)
 
-            # We load any gtif to read and copy the metadata
-            with rasterio.open(os.path.join(input_directory, df_filename.iloc[0]["filename"])) as src:
-                meta = src.meta
-                meta.update(dtype=rasterio.float32, count=1, driver='GTiff')  
-                
-                # Save the aggregated file
-                with rasterio.open(output_path, 'w', **meta) as dst:
-                    dst.write(summed_raster.astype(rasterio.float32), 1)
-
-                print(f"Temporal processing file : {output_filename}")
+            print(f"Temporal processing file : {output_filename}")
 
 
 
@@ -446,7 +454,6 @@ def process_input(input_folder, interm_folder, output_folder, temp_factor, spati
     blur_and_spatial_downsampling(input_directory= interm_folder,
                                   output_directory=output_folder,
                                   spatial_factor=spatial_factor) # blurring and spatial downsampling, saving the results in the output folder
-
 
 
 

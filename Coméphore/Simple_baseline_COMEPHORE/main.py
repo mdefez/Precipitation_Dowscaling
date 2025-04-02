@@ -31,8 +31,9 @@ input_data = "../../../downscaling/mdefez/Comephore/test_baseline/input_data"
 ##############################################################################################################################
 ### First step : Process the data to create the inputs (blurring & downsampling)
 ##############################################################################################################################
-data_already_processed = True 
+data_already_processed = False 
 if not data_already_processed:
+    print("Downsampling data in space & time")
     tool.process_input(input_folder = original_data_path, 
                     interm_folder = temporal_downscaled_data_path,
                         output_folder = input_data, 
@@ -43,7 +44,7 @@ if not data_already_processed:
 ### Second step : Super-resolving in time & space
 ##############################################################################################################################
 # The predictions will be stored as array in a list (sorted by time)
-
+print("Super resolving in time")
 # Import the input into a (sorted) list of arrays
 list_filename_input, list_input_low_temporal_res = fun.get_array_sorted_by_time(input_data)
 
@@ -58,6 +59,7 @@ time_sr = fun.temporal_super_resolve(list_input_low_temporal_res = list_input_lo
 # We now have a list of arrays with a 1 hour temporal resolution
 
 ################# Spatially super resolve ################################
+print("Super resolving in space")
 target_size = (1294, 2156) # high res of the Coméphore dataset
 
 # Choose an avaiable space super resolving method between them
@@ -70,7 +72,7 @@ list_output = [fun.bicubic_interpolation(arr, target_size) for arr in time_sr][:
 ##############################################################################################################################
 ### Third step : Computing the metrics and eventually plot some samples
 ##############################################################################################################################
-
+print("Plotting examples")
 # Get the target data in a array format & sort the list with respect to timesteps in the filename
 list_filename_target, list_target = fun.get_array_sorted_by_time(original_data_path)
 

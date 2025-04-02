@@ -39,8 +39,8 @@ def get_array_sorted_by_time(folder_gtif_file):
 ################################################################################################################################
 
 # Spatial bicubic interpolation
-def bicubic_interpolation(arr, target_size): # target size en (ligne, colonne) 
-    arr = tool.fill_na_arr(arr) # We fillna as a padding method (that's mirror padding basically)
+def bicubic_interpolation(arr, target_size): # target size in (row, column) 
+    arr = tool.fill_na_arr(arr, margin = 3) # We fillna as a padding method (that's mirror padding basically)
     arr_augmented = cv2.resize(arr, (target_size[1], target_size[0]), interpolation=cv2.INTER_CUBIC)
 
     return arr_augmented
