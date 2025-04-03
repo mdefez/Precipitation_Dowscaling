@@ -1,26 +1,26 @@
 # This file aims to store useful functions for the simplebaseline pipeline
 
-from ast import Call
-from os import times
-from turtle import title
 import pandas as pd
-import rasterio
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import wasserstein_distance
 from scipy.stats import ks_2samp
+import re
 import sys 
 import os
 from typing import Callable
 
 sys.path.append(os.path.join(os.getcwd(), "Coméphore/Processing_input_data"))
+sys.path.append(os.path.join(os.getcwd(), "Coméphore/CV_pipeline"))
 import tools as tool
+import split_files as sp
 
 ################################################################################################################################
 ######################## PART 1 : Utility functions ###################################################################
 ################################################################################################################################
+
 
 # This function takes a folder in argument (containing gtif files)
 # It transforms the files to array returns a list of those arrays
@@ -33,6 +33,12 @@ def get_array_sorted_by_time(folder_gtif_file):
     list_filename, list_array = tool.sort_string_list(list_filename, list_array) # Sort both list according to the timestep in the filename
 
     return list_filename, list_array
+
+def adapting_target_name(list_filename_target):
+    pattern = r'\d+(\.\d+)?'
+    new_filename = [f"ground_truth_{re.search(pattern, text).group()}" for text in list_filename_target]
+
+    return new_filename
 
 ################################################################################################################################
 ######################## PART 2 : SUPER RESOLUTION FUNCTIONS ###################################################################
@@ -49,8 +55,11 @@ def bicubic_interpolation(arr, target_size): # target size in (row, column)
 def nearest_neighbor(arr, target_size): # Apply the one nearest neighbor
     return cv2.resize(arr, (target_size[1], target_size[0]), interpolation=cv2.INTER_NEAREST)
     
+def spatially_downsample(list_low_res, target_size, method : Callable, nb_files_to_downsample, list_filename_low_res):
+    list_output = [method(arr, target_size) for arr in list_low_res][:nb_files_to_downsample] 
+    list_filename = [f"{input_filename[:10]}_prediction" for input_filename in list_filename_low_res][:nb_files_to_downsample] 
 
-
+    return list_output, list_filename
 
 # Temporal interpolation
 # This function takes 2 gtif files as input and a temporal factor
@@ -59,17 +68,27 @@ def temporal_interpolation(array_1, array_2, temp_factor):
         return [(array_1 * (temp_factor - i) / temp_factor + array_2 * i / temp_factor) for i in range(temp_factor)]
 
 # This function super resolves the folder into the specified temporal SR factor according to a method
-def temporal_super_resolve(list_input_low_temporal_res, temp_factor, method : Callable):
+def temporal_super_resolve(list_input_low_temporal_res, list_filename_input, temp_factor, method : Callable):
     time_sr = [] # Stores the final SR frames
+    list_filename = [] # Stores the filename of the SR frames
 
     for k in range(len(list_input_low_temporal_res)-1): # Compute every low res frame according to the method
         augmented_data = method(list_input_low_temporal_res[k], 
                                                     list_input_low_temporal_res[k+1], 
-                                                    temp_factor = temp_factor)
-        for arr in augmented_data:
-            time_sr.append(arr)
+                                                    temp_factor = temp_factor) # List of the intermediate frames
+        
+        ongoing_date = list_filename_input[k][10:20] # Date of the computed samples 
+        hour_to_add = 0
 
-    return time_sr
+        for arr in augmented_data:
+            time_sr.append(arr) # Add the array
+
+            hour_to_save = sp.format_int(int(ongoing_date[8:10]) + hour_to_add) # Compute its corresponding hour with legnth =
+            list_filename.append(f"{ongoing_date[0:8] + hour_to_save}_temporally_sr") # Add the date as filename
+
+            hour_to_add += 1
+
+    return time_sr, list_filename
 
 
 
@@ -171,11 +190,11 @@ def métrique(pred_ini : np.ndarray, target : np.ndarray, timestep):
 
 
 # Plot the prediction vs the ground truth
-def plot_pred_truth(pred : np.ndarray, target : np.ndarray, filename, output_folder, spatial_factor, temp_factor):
+def plot_pred_truth(pred : np.ndarray, target : np.ndarray, filename_pred, filename_target, 
+                    output_folder, spatial_factor, temp_factor):
 
-    timestep = filename[10:20]
-    title_pred = f"Prediction {timestep}\nSpatial SR factor : {spatial_factor} km\nTemporal SR factor : {temp_factor} hours"
-    title_target = f"Ground truth {timestep}"
+    title_pred = f"{filename_pred}\nSpatial SR factor : {spatial_factor} km\nTemporal SR factor : {temp_factor} hours"
+    title_target = f"{filename_target}"
 
     pred = pd.DataFrame(pred)
     tool.plot_coméphore_high_res(pred, output_folder + "/predictions", title = title_pred)
@@ -183,10 +202,12 @@ def plot_pred_truth(pred : np.ndarray, target : np.ndarray, filename, output_fol
     target = pd.DataFrame(target)
     tool.plot_coméphore_high_res(target, output_folder + "/target", title = title_target, preprocess = True)
 
-def plot_all_examples(nb_files, list_pred, list_target, list_filename, output_folder, spatial_factor, temp_factor):
+def plot_all_examples(nb_files, list_pred, list_filename_pred, list_target, list_filename_target, 
+                      output_folder, spatial_factor, temp_factor):
+    
     for sample in range(nb_files):
-        plot_pred_truth(pred = list_pred[sample], 
-                        target = list_target[sample], filename = list_filename[sample],
+        plot_pred_truth(pred = list_pred[sample], filename_pred= list_filename_pred[sample],
+                        target = list_target[sample], filename_target = list_filename_target[sample],
                         output_folder = output_folder,
                         spatial_factor=spatial_factor,
                         temp_factor=temp_factor)

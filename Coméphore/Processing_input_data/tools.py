@@ -1,8 +1,5 @@
 # This file stores useful functions concerning the Coméphore dataset
 
-from array import array
-from datetime import time
-from turtle import down
 import pandas as pd
 import numpy as np
 import os
@@ -17,18 +14,7 @@ import cartopy.feature as cfeature
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.interpolate import griddata
 import geopandas as gpd
-from turtle import down
-import pandas as pd
-import numpy as np
-from scipy.ndimage import gaussian_filter, uniform_filter
-import rasterio
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-from matplotlib.backends.backend_pdf import PdfPages
-from scipy.interpolate import griddata
-import geopandas as gpd
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point
 import ipdb
 
 # Example of path to projected data
@@ -369,8 +355,11 @@ def blur_and_spatial_downsampling(input_directory, output_directory, spatial_fac
             meta["width"] = fill_na_df.shape[1]
             meta["height"] = fill_na_df.shape[0]
 
-            with rasterio.open(os.path.join(output_directory, output_name), 'w', **meta) as dst: # Save the downsampling file
+            with rasterio.open(os.path.join(output_directory, output_name), 'w', **meta) as dst: # Save the downsampled file
                 dst.write(fill_na_df.astype(rasterio.float32), 1)
+
+            # We delete the high res file from the temporary folder
+            os.remove(os.path.join(input_directory, filename))
 
 # This function takes as input a folder where remain the samples we want to aggregate, the temporal factor to use
 # and the output folder where we want to store the aggregated dataframes
@@ -414,6 +403,7 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
                 time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"] = []
 
             time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"].append(data)
+
         count += 1
 
         if count == temp_factor:
