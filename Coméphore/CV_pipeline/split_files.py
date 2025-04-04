@@ -14,7 +14,7 @@
 
 ### One have to keep in mind our training & testing datasets depend on the method we used image/video super resolution
 
-input_data_path = "../../../downscaling/mdefez/Comephore/test_baseline/input_data"
+input_data_path = "../../../downscaling/mdefez/Comephore/downsampled_data/input_data"
 # format of the input file : 'beggining_YYYYMMDDHH_temp_factor_<temp_factor>_spatial_factor_<spatial_factor>.gtif'
 
 def format_int(int): # Set int to the str format with length 2 (using 0 padding if needed)

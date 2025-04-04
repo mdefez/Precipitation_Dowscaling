@@ -1,7 +1,6 @@
 # This file execute the whole pipeline :
-# 1) Processing the data 
-# 2) Super-resolving in time & space
-# 3) Computing the metrics and eventually plot some samples
+# - Super-resolving in time & space
+# - Computing the metrics and eventually plot some samples
 
 import os 
 import sys
