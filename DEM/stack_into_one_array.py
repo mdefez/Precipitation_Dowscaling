@@ -5,14 +5,17 @@
 # Then we can concatenate the matrix on the rows and on the columns
 
 import os
+from typing import final
 import numpy as np
 import rasterio
 from skimage.measure import block_reduce
 from scipy.ndimage import zoom
 import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
-range_north = range(53, 38, -1) # We look at arrays until 54° (Coméphore is 54.2°)
-range_west = range(170, 180)
+range_north = range(54, 38, -1) # We look at arrays until 54° (Coméphore is 54.2°)
+range_west = range(10, 0, -1)
 range_east = range(0, 15)
 
 def get_file(north, lon, east_or_west):
@@ -26,6 +29,7 @@ def get_file(north, lon, east_or_west):
     except:
         return None
 
+# We have to downsample each tile before concatenate them because of memory
 facteur_de_réduction = 10
 new_size = int(3601 / facteur_de_réduction) + 1
 
@@ -78,6 +82,15 @@ final_array = np.vstack(rows)
 # Fill the nan with 0
 final_array = np.nan_to_num(final_array, 0)
 
+# Before resizing, one should crop the edges so the array represent the correct coméphore area
+comephore_area = [-9.965, 14.563084827903268, 39.4626295723437, 54.184031134174326]
+dem_area = [-10, 15, 39, 55]
+
+diff = [abs(dem_area[k] - comephore_area[k]) for k in range(len(comephore_area))]
+col_to_delete = [int(new_size * d) for d in diff]
+
+final_array = final_array[col_to_delete[2]: - col_to_delete[3], col_to_delete[0] : - col_to_delete[1]]
+
 # Scale the array to the Coméphore resolution
 scale_x = 1294 / final_array.shape[0]
 scale_y = 2156 / final_array.shape[1]
@@ -87,10 +100,21 @@ array_resized = zoom(final_array, (scale_x, scale_y), order=1)
 # Save and plot
 np.save("DEM/DEM_Coméphore.npy", array_resized)
 
-plt.imshow(array_resized, cmap='terrain')  
-plt.colorbar(label='Height (m)')  
+fig, ax = plt.subplots(figsize=(6, 4), subplot_kw={'projection': ccrs.PlateCarree()})  
+
+# Plotting the heatmap
+im = ax.imshow(array_resized, extent=[-9.965, 14.563084827903268, 39.4626295723437, 54.184031134174326], origin='upper', cmap='terrain')
+
+
+# Plot the colorbar
+plt.colorbar(im, ax=ax, label='Height (m)', pad = 0.1)
+ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
+ax.add_feature(cfeature.COASTLINE, edgecolor='black')
+
+ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 plt.title("DEM")
 plt.savefig("DEM/DEM_coméphore_area.png")
+plt.close()
 
 
 

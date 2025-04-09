@@ -66,9 +66,9 @@ for k in range(1, 13): # Set to 13 to convert all the data, to 2 just to test on
 
             with rasterio.open(destination + "/" + "Projected_" + file, "w", driver='GTiff', height=height, width=width,
         count=src.count, dtype=src.dtypes[0], crs="EPSG:4326", transform=transform,
-        compress='lzw',  # Compression LZW pour réduire la taille du fichier
-        tiled=True,      # Tiling pour améliorer la performance et réduire la taille
-        blockxsize=256,  # Taille des blocs pour la compression (ajustable)
+        compress='lzw',  # Compressing the file for memory issues
+        tiled=True,      
+        blockxsize=256,  
         blockysize=256
     ) as dst:
                 rasterio.warp.reproject(

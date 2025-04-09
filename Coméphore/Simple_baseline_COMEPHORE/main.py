@@ -12,6 +12,7 @@ import functions as fun
 spatial_factor = 25
 temp_factor = 6
 
+
 # If we want to work on the little dataset (02/2019)
 original_data_path = "../../../downscaling/mdefez/Comephore/Projected_data/2019/COMEPHORE_2019_2/2019"
 input_data = "../../../downscaling/mdefez/Comephore/lil_dataset/input_data"

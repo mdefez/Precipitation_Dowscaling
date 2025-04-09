@@ -3,7 +3,7 @@
 import zipfile
 import os
 
-os.makedirs("../../../downscaling/mdefez/DEM/data") # Create a folder to store the decompressed files
+os.makedirs("../../../downscaling/mdefez/DEM/data", exist_ok=True) # Create a folder to store the decompressed files
 
 all_zip = os.listdir("../../../downscaling/mdefez/DEM/zip") # List all the compressed files
 
@@ -14,4 +14,6 @@ for zip in all_zip:
     with zipfile.ZipFile(zip_file_path, 'r') as zip_ref: # Decompress the file
         name = zip.split(".")[0]
         zip_ref.extractall(f"../../../downscaling/mdefez/DEM/data/{name}")
+
+
 

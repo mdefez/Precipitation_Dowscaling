@@ -20,6 +20,20 @@ import ipdb
 # Example of path to projected data
 path_projected = f"../../../downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019/Projected_2019020918_RR.gtif"
 
+
+#################################################################################################################################
+################################################## PART ZERO : USEFUL FUNCTIONS ########################################################
+#################################################################################################################################
+
+# This functions givees the path corresponding to the input timestep
+# Timestep should be YYYYMMDDHH
+def get_path(timestep):
+    year = timestep[:4]
+    month = int(timestep[4:6])
+
+    path = f"../../../downscaling/mdefez/Comephore/Projected_data/{year}/COMEPHORE_{year}_{month}/{year}/Projected_{timestep}_RR.gtif"
+    return path
+
 #################################################################################################################################
 ################################################## FIRST PART : PLOTTING ########################################################
 #################################################################################################################################
@@ -267,6 +281,21 @@ def downsampling(df, factor):
 
     return df_downsampled
 
+def downsampling_arr(arr, factor):
+    # We fill the nan 
+    arr = fill_na_arr(arr)
+
+    # Downsample
+    new_shape = (arr.shape[0] // factor * factor, arr.shape[1] // factor * factor)
+
+    # Tronquer l'array aux dimensions ajustées
+    arr_downsampled = arr[:new_shape[0], :new_shape[1]]
+
+    # Reshape et calcul de la moyenne
+    arr_downsampled = arr_downsampled.reshape(new_shape[0] // factor, factor, new_shape[1] // factor, factor).mean(axis=(1, 3))
+  
+    return arr_downsampled
+
 # This function extracts a gpd object representing France
 def get_france_geo_points(spatial_factor, path_shp = "Coméphore/Processing_input_data/filter_france"):
 
@@ -318,7 +347,7 @@ def set_to_nan(df, list_nan):
     return pd.DataFrame(df, index=df.index, columns=df.columns)
 
 # Blur and spatially downsample all the samples
-def blur_and_spatial_downsampling(input_directory, output_directory, spatial_factor):
+def blur_and_spatial_downsampling(input_directory, output_directory, spatial_factor, area = None):
     france = get_france_geo_points(spatial_factor, path_shp="Coméphore/Processing_input_data/filter_france")
     os.makedirs(output_directory, exist_ok=True)
 
@@ -333,37 +362,52 @@ def blur_and_spatial_downsampling(input_directory, output_directory, spatial_fac
     list_dir_sorted = list(df_sort["filename"])
 
     for filename in list_dir_sorted:
-        output_name = f"{filename[:-5]}_spatial_factor_{spatial_factor}.gtif"
-        print(f"Spatial processing file : {output_name}")
-        with rasterio.open(os.path.join(input_directory, filename), 'r') as f:
-            df = f.read(1)
-            df = pd.DataFrame(df)
+
+        if area == None:
+            output_name = f"{filename[:-5]}_spatial_factor_{spatial_factor}.gtif"
+            print(f"Spatial processing file : {output_name}")
+            with rasterio.open(os.path.join(input_directory, filename), 'r') as f:
+                df = f.read(1)
+                df = pd.DataFrame(df)
+                # Downsampling with respect to the specified factor
+                downsampled_df = downsampling(df, spatial_factor)
+
+                if filename == list_dir_sorted[0]: # We compute it once
+                    low_res = downsampled_df.shape
+                    # Compute the points to set to nan given the new shape
+                    to_nan = nan_non_french_points(low_res, france)
+
+                # Set to nan if not in france
+                fill_na_df = set_to_nan(downsampled_df, to_nan)
+
+                meta = f.meta # Save the meta to copy on downsampled file
+                meta.update(dtype=rasterio.float32, count=1, driver='GTiff') 
+                # Be careful, we must change the width & height given that we downsampled
+                meta["width"] = fill_na_df.shape[1]
+                meta["height"] = fill_na_df.shape[0]
+
+                with rasterio.open(os.path.join(output_directory, output_name), 'w', **meta) as dst: # Save the downsampled file
+                    dst.write(fill_na_df.astype(rasterio.float32), 1)
+
+                # We delete the high res file from the temporary folder
+                os.remove(os.path.join(input_directory, filename))
+
+        if area == "RNB":
+            output_name = f"{filename[:-4]}_spatial_factor_{spatial_factor}.npy"
+            print(f"Spatial processing file : {output_name}")
+            
+            data = np.load(os.path.join(input_directory, filename))
+        
             # Downsampling with respect to the specified factor
-            downsampled_df = downsampling(df, spatial_factor)
+            downsampled_array = downsampling_arr(data, spatial_factor)
 
-            if filename == list_dir_sorted[0]: # We compute it once
-                low_res = downsampled_df.shape
-                # Compute the points to set to nan given the new shape
-                to_nan = nan_non_french_points(low_res, france)
+            np.save(os.path.join(output_directory, output_name), downsampled_array)
 
-            # Set to nan if not in france
-            fill_na_df = set_to_nan(downsampled_df, to_nan)
-
-            meta = f.meta # Save the meta to copy on downsampled file
-            meta.update(dtype=rasterio.float32, count=1, driver='GTiff') 
-            # Be careful, we must change the width & height given that we downsampled
-            meta["width"] = fill_na_df.shape[1]
-            meta["height"] = fill_na_df.shape[0]
-
-            with rasterio.open(os.path.join(output_directory, output_name), 'w', **meta) as dst: # Save the downsampled file
-                dst.write(fill_na_df.astype(rasterio.float32), 1)
-
-            # We delete the high res file from the temporary folder
             os.remove(os.path.join(input_directory, filename))
 
 # This function takes as input a folder where remain the samples we want to aggregate, the temporal factor to use
 # and the output folder where we want to store the aggregated dataframes
-def temporal_downsampling(input_directory, output_directory, temp_factor):
+def temporal_downsampling(input_directory, output_directory, temp_factor, area = None):
 
     os.makedirs(output_directory, exist_ok=True)
 
@@ -371,8 +415,11 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
     time_groups = {}
     
     # Creating a df with the filename and the corresponding timestep
+    if area == None:
+        liste_timestep = [int(filename[10:20]) for filename in os.listdir(input_directory)] # Format YYYYMMJJHH24
+    if area == "RNB":
+        liste_timestep = [int(filename[:10]) for filename in os.listdir(input_directory)] # Format YYYYMMJJHH24
 
-    liste_timestep = [int(filename[10:20]) for filename in os.listdir(input_directory)] # Format YYYYMMJJHH24
     liste_filename = os.listdir(input_directory)
 
     df_filename = pd.DataFrame({"filename" : liste_filename, "timestep" : liste_timestep})
@@ -388,8 +435,9 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
     count = 0   # Reset when we put enough frames into a key
     for k in range(len(df_filename)):
         # Load the file and save it to the right key
-        with rasterio.open(os.path.join(input_directory, df_filename.iloc[k]["filename"])) as src:
-            data = np.array(src.read(1))
+        if area == None:
+            with rasterio.open(os.path.join(input_directory, df_filename.iloc[k]["filename"])) as src:
+                data = np.array(src.read(1))
 
             # Fill the fake value by nan
             data = np.where(data >= 65535, np.nan, data)
@@ -397,12 +445,19 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
             # We divide by 10 to have mm
             data = data / 10
 
-            # If the list does not exist yet
-            if count == 0:
-                timestep_name = df_filename.iloc[k]["timestep"]
-                time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"] = []
+        if area == "RNB": # If RNB, it's already an array
+            data = np.load(os.path.join(input_directory, df_filename.iloc[k]["filename"]))
 
-            time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"].append(data)
+
+
+        # If the list does not exist yet
+        if count == 0:
+            timestep_name = df_filename.iloc[k]["timestep"]
+            if str(timestep_name)[6:10] == "0101" and area == "RNB": # The first aggregated raster of each month will have only 5 rasters
+                count = 1
+            time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"] = []
+
+        time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"].append(data)
 
         count += 1
 
@@ -417,33 +472,41 @@ def temporal_downsampling(input_directory, output_directory, temp_factor):
 
         summed_raster = np.mean(rasters, axis=0)
         
-        # We put the date and hour range in the output filename
-        output_filename = f"{name}.gtif"
-        output_path = os.path.join(output_directory, output_filename)
+        if area == None:
+            # We put the date and hour range in the output filename
+            output_filename = f"{name}.gtif"
+            output_path = os.path.join(output_directory, output_filename)
 
-        # We load any gtif to read and copy the metadata
-        with rasterio.open(os.path.join(input_directory, df_filename.iloc[0]["filename"])) as src:
-            meta = src.meta
-            meta.update(dtype=rasterio.float32, count=1, driver='GTiff')  
-            
-            # Save the aggregated file
-            with rasterio.open(output_path, 'w', **meta) as dst:
-                dst.write(summed_raster.astype(rasterio.float32), 1)
+            # We load any gtif to read and copy the metadata
+            with rasterio.open(os.path.join(input_directory, df_filename.iloc[0]["filename"])) as src:
+                meta = src.meta
+                meta.update(dtype=rasterio.float32, count=1, driver='GTiff')  
+                
+                # Save the aggregated file
+                with rasterio.open(output_path, 'w', **meta) as dst:
+                    dst.write(summed_raster.astype(rasterio.float32), 1)
 
+                print(f"Temporal processing file : {output_filename}")
+
+        if area == "RNB":
+            output_filename = f"{name}.npy"
+            output_path = os.path.join(output_directory, output_filename)
+            np.save(output_path, summed_raster)
             print(f"Temporal processing file : {output_filename}")
 
 
 
 # The final function, that processes end-to-end the whole input dataset and save the output in a specified folder
-def process_input(input_folder, interm_folder, output_folder, temp_factor, spatial_factor):
+# We use a variable "area" that allows to specify the kind of area downsampled (to use specific features)
+def process_input(input_folder, interm_folder, output_folder, temp_factor, spatial_factor, area = None):
 
     temporal_downsampling(input_directory=input_folder,
                           output_directory=interm_folder,
-                          temp_factor=temp_factor) # Temporal downsampling and saving the results in the intermediate folder
+                          temp_factor=temp_factor, area = area) # Temporal downsampling and saving the results in the intermediate folder
 
     blur_and_spatial_downsampling(input_directory= interm_folder,
                                   output_directory=output_folder,
-                                  spatial_factor=spatial_factor) # blurring and spatial downsampling, saving the results in the output folder
+                                  spatial_factor=spatial_factor, area = area) # blurring and spatial downsampling, saving the results in the output folder
 
 
 
