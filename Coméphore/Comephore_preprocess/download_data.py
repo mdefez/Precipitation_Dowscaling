@@ -15,7 +15,7 @@ data = response.json()
 year_to_download = 2023
 
 # Path to the uploading file
-path_upload = "../../../downscaling/raw_data/Comephore/Original_data"
+path_upload = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/raw_data/Comephore/Original_data"
 
 # Download files
 for resource in data["resources"]:

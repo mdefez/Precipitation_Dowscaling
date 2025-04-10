@@ -20,7 +20,7 @@ range_east = range(0, 15)
 
 def get_file(north, lon, east_or_west):
     filename = f"N{north}_00_{east_or_west}{str(lon).zfill(3)}"
-    foldername = f"../../../downscaling/mdefez/DEM/data/{filename}/"
+    foldername = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/DEM/data/{filename}/"
 
     try:
         file = foldername + os.listdir(foldername)[0] + f"/Copernicus_DSM_10_{filename}_00/DEM//Copernicus_DSM_10_{filename}_00_DEM.dt2"
@@ -98,7 +98,7 @@ scale_y = 2156 / final_array.shape[1]
 array_resized = zoom(final_array, (scale_x, scale_y), order=1)
 
 # Save and plot
-np.save("DEM/DEM_Coméphore.npy", array_resized)
+np.save("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM/DEM_Coméphore.npy", array_resized)
 
 fig, ax = plt.subplots(figsize=(6, 4), subplot_kw={'projection': ccrs.PlateCarree()})  
 
@@ -113,7 +113,7 @@ ax.add_feature(cfeature.COASTLINE, edgecolor='black')
 
 ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 plt.title("DEM")
-plt.savefig("DEM/DEM_coméphore_area.png")
+plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM/DEM_coméphore_area.png")
 plt.close()
 
 

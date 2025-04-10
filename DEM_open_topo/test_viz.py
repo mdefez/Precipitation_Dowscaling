@@ -5,7 +5,7 @@ import cartopy.feature as cfeature
 from rasterio.transform import xy
 
 # Charger le fichier .tif
-with rasterio.open("DEM_open_topo/low_res.tif") as src:
+with rasterio.open("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/low_res.tif") as src:
     image = src.read(1)  # Lire la première bande
     width = src.width
     height = src.height
@@ -34,6 +34,6 @@ with rasterio.open("DEM_open_topo/low_res.tif") as src:
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
     plt.title("DEM")
-    plt.savefig("DEM_open_topo/DEM_low_res.png")
+    plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/DEM_low_res.png")
     plt.close()
 

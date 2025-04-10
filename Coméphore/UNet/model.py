@@ -1,3 +1,6 @@
+# The goal of this script is to implement a UNet class
+# The model takes 3 channels as input (2 low res frames and DEM) and returns 6 high res frames
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,35 +9,34 @@ class UNet(nn.Module):
     def __init__(self):
         super(UNet, self).__init__()
 
-        # Encoder (Downsampling)
-        self.encoder1 = self.conv_block(3, 64)  # 3 input channels (pour les 2 images basses résolutions + channel), 64 output channels
+        # Encoder
+        self.encoder1 = self.conv_block(3, 64)  # 3 input channels 
         self.encoder2 = self.conv_block(64, 128)
         self.encoder3 = self.conv_block(128, 256)
         self.encoder4 = self.conv_block(256, 512)
 
-        self.encoder_pool = nn.MaxPool2d(2, 2)  # Max pooling après chaque convolution
+        self.encoder_pool = nn.MaxPool2d(2, 2)  # Max pooling layer, to put after each convolution
 
-        # Bottleneck (Bottleneck layer with no pooling, only convolution)
+        # Bottleneck layer with no pooling, only convolution
         self.bottleneck = self.conv_block(512, 1024)
 
-        # Decoder (Upsampling)
+        # Decoder 
         self.upconv4 = self.up_conv(1024, 512)
         self.upconv3 = self.up_conv(1024, 256) # The input is the concatenated (upconv above, encoder) so twice the output above
         self.upconv2 = self.up_conv(512, 128)
         self.upconv1 = self.up_conv(256, 64)
 
         # Output layer (Final layer for 6 predicted images)
-        self.output_layer = self.last_layer(128, 64, 6) # input, inter & output channels
+        self.output_layer = self.last_layer(128, 64, 6) # We do two convolution in the last layer the variables are : input channels, intermediate channels, final channels
 
 
-    def pad_to_match(self, tensor, target_tensor): # Gérer les arrondis de dimension lors du max pooling quand c'est impair
+    def pad_to_match(self, tensor, target_tensor): # When decode, we eventually pad to 0 to match the corresponding encoder frame we concatenate on
         _, _, h, w = tensor.shape
         _, _, target_h, target_w = target_tensor.shape
 
         diff_y = target_h - h
         diff_x = target_w - w
 
-        # Padding = (left, right, top, bottom)
         pad_left = diff_x // 2
         pad_right = diff_x - pad_left
         pad_top = diff_y // 2
@@ -44,7 +46,6 @@ class UNet(nn.Module):
 
 
     def conv_block(self, in_channels, out_channels):
-        """Bloc de convolution pour le bottleneck (pas de MaxPooling ici)"""
         return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
@@ -54,21 +55,19 @@ class UNet(nn.Module):
         )
 
     def up_conv(self, in_channels, out_channels):
-        """Bloc de convolution transposé pour la décodification (upsampling)"""
         return nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
     
     def last_layer(self, in_channels, interm_channels, out_channels):
-        """Bloc de convolution pour le bottleneck (pas de MaxPooling ici)"""
         return nn.Sequential(
             nn.Conv2d(in_channels, interm_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(interm_channels, out_channels, kernel_size=1),
+            nn.Conv2d(interm_channels, out_channels, kernel_size=1), # 1x1 convolution as final step
         )
 
-    def forward(self, x):
-        # Encoder (Downsampling)
+    def unet_forward(self, x): # Be careful, this is only the UNet block, the "real" forward is below
+        # Encoder 
         conv1 = self.encoder1(x)
-        pool1 = self.encoder_pool(conv1)
+        pool1 = self.encoder_pool(conv1) # We use two separate layers for convolution & pooling to keep track of the convolution's output, we can later concatenate in the decoder
 
         conv2 = self.encoder2(pool1)
         pool2 = self.encoder_pool(conv2)
@@ -79,12 +78,12 @@ class UNet(nn.Module):
         conv4 = self.encoder4(pool3)
         pool4 = self.encoder_pool(conv4)
 
-        # Bottleneck (sans MaxPooling, juste des convolutions)
+        # Bottleneck 
         bottleneck = self.bottleneck(pool4)
 
-        # Decoder (Upsampling)
+        # Decoder 
         dec4 = self.upconv4(bottleneck)
-        dec4 = torch.cat([dec4, conv4], dim=1)  # Concatenation avec enc4
+        dec4 = torch.cat([dec4, conv4], dim=1)  # Skip connection
 
         dec3 = self.upconv3(dec4)
         dec3 = self.pad_to_match(dec3, conv3) 
@@ -96,10 +95,30 @@ class UNet(nn.Module):
         dec1 = self.upconv1(dec2)
         dec1 = torch.cat([dec1, conv1], dim=1)
 
-        # Sortie finale : 6 images prédites
+        # Final layer
         output = self.output_layer(dec1)
 
         return output
+    
+    def forward(self, inp0, inp1, inp2): # This upsamples the 2 first channels and pass the 3 channels to the UNet
+
+        # If both input are all zeroes, then we force the predictions to be zero. Otherwise, usual pipeline
+        if (inp0.abs().sum() == 0) and (inp1.abs().sum() == 0):
+
+            B = inp0.size(0)    
+            device = inp0.device
+            out_shape = (B, 3, 100, 100)  # We compute the output shape
+            return torch.zeros(out_shape, device=device)
+
+        # Upsample the 2 frames with bicubic interpolation
+        inp0_up = F.interpolate(inp0, size=(100, 100), mode='bicubic', align_corners=False)
+        inp1_up = F.interpolate(inp1, size=(100, 100), mode='bicubic', align_corners=False)
+
+        # Concatenate the new input
+        x_up = torch.cat([inp0_up, inp1_up, inp2], dim=1)
+
+        # Pass it to the UNet
+        return self.unet_forward(x_up)
 
 
 

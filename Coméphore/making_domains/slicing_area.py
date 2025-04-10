@@ -15,10 +15,10 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import sys, os
 
-sys.path.append(os.path.join(os.getcwd(), "Coméphore/Processing_input_data"))
+sys.path.append("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Processing_input_data")
 import tools as tool
 
-ex_file = "../../../downscaling/mdefez/Comephore/Projected_data/2020/COMEPHORE_2020_2/2020/Projected_2020021510_RR.gtif"
+ex_file = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/2020/COMEPHORE_2020_2/2020/Projected_2020021510_RR.gtif"
 
 # Load a sample to compute locations
 with rasterio.open(ex_file, 'r') as src:
@@ -76,7 +76,7 @@ def get_a_tile(hor, vert, timestep):
     return tile
 
 def get_dem(hor, vert):
-    with rasterio.open("DEM_open_topo/low_res.tif", 'r') as src:
+    with rasterio.open("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/low_res.tif", 'r') as src:
         arr = np.array(src.read(1))
         idx_row, idx_column = dict_coord[f"horizontal_{hor}_vertical_{vert}"][0], dict_coord[f"horizontal_{hor}_vertical_{vert}"][1]
 
@@ -120,24 +120,24 @@ def save_target_data(output_folder, year): # Usually output = "../../../downscal
 
                 np.save(f"{output_folder}/{year}/tile_hor_{hor}_vert_{vert}/{timestep}.npy", tile)
 
-# save_target_data("../../../downscaling/mdefez/Comephore/RNB/target_data", "2024")
+# save_target_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data", "2024")
 
 # Downsample the data to create the input
-def save_input_data(output_folder, year): # Usually output = "../../../downscaling/mdefez/Comephore/RNB/input_data"
+def save_input_data(output_folder, year): # Usually output = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data"
     for hor in range(nb_tile_horizontal):
         for vert in range(nb_tile_vertical):
             print(hor, vert)
-            # Ge the dem file
-            input_folder = f"../../../downscaling/mdefez/Comephore/RNB/target_data/{year}/tile_hor_{hor}_vert_{vert}"
+            # Get the dem file
+            input_folder = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data/{year}/tile_hor_{hor}_vert_{vert}"
             output_folder_tile = os.path.join(output_folder, year, f"tile_hor_{hor}_vert_{vert}")
 
             tool.process_input(input_folder = input_folder, 
-                               interm_folder = f"../../../downscaling/mdefez/Comephore/RNB/interm_data/{year}/tile_hor_{hor}_vert_{vert}",
+                               interm_folder = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/interm_data/{year}/tile_hor_{hor}_vert_{vert}",
                                  output_folder = output_folder_tile, temp_factor = 6, spatial_factor = 25,
                                  area = "RNB")
 
 
-# save_input_data("../../../downscaling/mdefez/Comephore/RNB/input_data", "2024")
+# save_input_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data", "2024")
 
 # Save the DEM data tile by tile in the same folder as the coarse inpur data
 def save_dem(output_folder): 
@@ -150,7 +150,7 @@ def save_dem(output_folder):
 
             np.save(f"{output_folder}/dem_hor_{hor}_vert_{vert}.npy", dem)
 
-# save_dem("../../../downscaling/mdefez/Comephore/RNB/input_data/DEM")
+# save_dem("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/DEM")
 
 def plot_example():
     fig, ax = plt.subplots(figsize=(6, 4))  
@@ -163,7 +163,7 @@ def plot_example():
 
     plt.colorbar(im, ax=ax, label=f"Precipitation during the past hour(s) (mm)", pad = 0.1)
     plt.title(output_data.split("/")[-1])
-    plt.savefig("Coméphore/CV_pipeline/Images/target.png")
+    plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/CV_pipeline/Images/target.png")
     plt.close()
 
     fig, ax = plt.subplots(figsize=(6, 4))  
@@ -172,7 +172,7 @@ def plot_example():
 
     plt.colorbar(im, ax=ax, label=f"Precipitation during the past hour(s) (mm)", pad = 0.1)
     plt.title(input_data.split("/")[-1])
-    plt.savefig("Coméphore/CV_pipeline/Images/low_res.png")
+    plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/CV_pipeline/Images/low_res.png")
     plt.close()
 
 plot_example()

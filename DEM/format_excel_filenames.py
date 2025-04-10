@@ -3,7 +3,7 @@
 import pandas as pd
 import re
 
-df_ori = pd.read_excel("DEM/source_copernicus.xlsx")
+df_ori = pd.read_excel("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM/source_copernicus.xlsx")
 
 # We execute this pipeline for each year 
 for year in range(2019, 2025):
@@ -48,4 +48,4 @@ for year in range(2019, 2025):
     df_ori["to keep"] = df_ori[f"coordinates {year}"].apply(keep_tiles)
     df_ori = df_ori.loc[df_ori["to keep"] == True].drop(["to keep"], axis = 1)
 
-df_ori.to_excel("DEM/correct_format_filename.xlsx")
+df_ori.to_excel("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM/correct_format_filename.xlsx")

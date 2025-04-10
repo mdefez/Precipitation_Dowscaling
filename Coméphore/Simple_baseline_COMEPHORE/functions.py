@@ -12,8 +12,8 @@ import sys
 import os
 from typing import Callable
 
-sys.path.append(os.path.join(os.getcwd(), "Coméphore/Processing_input_data"))
-sys.path.append(os.path.join(os.getcwd(), "Coméphore/CV_pipeline"))
+sys.path.append("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Processing_input_data")
+sys.path.append("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/CV_pipeline")
 import tools as tool
 import split_files as sp
 
@@ -102,7 +102,7 @@ def temporal_super_resolve(list_input_low_temporal_res, list_filename_input, tem
 # Takes array as input
 def métrique(pred_ini : np.ndarray, target : np.ndarray, timestep):
 
-    with PdfPages(f"Coméphore/Simple_baseline_COMEPHORE/Images/{timestep}/figures.pdf") as pdf:
+    with PdfPages(f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Simple_baseline_COMEPHORE/Images/{timestep}/figures.pdf") as pdf:
 
         ############ RMSE computing #####################################################################
         res = np.nanmean((pred_ini - target) ** 2) ** 0.5

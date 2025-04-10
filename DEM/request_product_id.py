@@ -3,7 +3,7 @@
 import pandas as pd
 import requests
 
-df_coordinates = pd.read_excel("DEM/correct_format_filename.xlsx")
+df_coordinates = pd.read_excel("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM/correct_format_filename.xlsx")
 
 list_product_id = []
 
@@ -29,5 +29,5 @@ for k in range(len(df_coordinates)):
 
 df_coordinates["Id"] = list_product_id
 
-df_coordinates.to_excel("DEM/coordinates_with_id.xlsx")
+df_coordinates.to_excel("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM/coordinates_with_id.xlsx")
 

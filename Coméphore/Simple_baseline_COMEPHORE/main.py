@@ -6,7 +6,7 @@ import os
 import sys
 import ipdb
 
-sys.path.append(os.path.join(os.getcwd(), "Coméphore/Simple_baseline_COMEPHORE"))
+sys.path.append("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Simple_baseline_COMEPHORE")
 import functions as fun
 
 spatial_factor = 25
@@ -14,8 +14,8 @@ temp_factor = 6
 
 
 # If we want to work on the little dataset (02/2019)
-original_data_path = "../../../downscaling/mdefez/Comephore/Projected_data/2019/COMEPHORE_2019_2/2019"
-input_data = "../../../downscaling/mdefez/Comephore/lil_dataset/input_data"
+original_data_path = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/2019/COMEPHORE_2019_2/2019"
+input_data = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/lil_dataset/input_data"
 
 
 ##############################################################################################################################
@@ -70,7 +70,7 @@ fun.plot_all_examples(nb_files = nb_files_to_downsample,
                       list_target = list_target,
                       list_filename_pred = list_filename_prediction,
                       list_filename_target = list_filename_target,
-                      output_folder = "Coméphore/Simple_baseline_COMEPHORE/plot_result",
+                      output_folder = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Simple_baseline_COMEPHORE/plot_result",
                       spatial_factor = spatial_factor,
                         temp_factor = temp_factor)
 
