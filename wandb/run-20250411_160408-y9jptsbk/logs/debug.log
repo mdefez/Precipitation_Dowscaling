@@ -1,0 +1,16 @@
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_setup.py:_flush():67] Current SDK version is 0.19.9
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_setup.py:_flush():67] Configure stats pid to 1225808
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_setup.py:_flush():67] Loading settings from /users/mdefez/.config/wandb/settings
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_setup.py:_flush():67] Loading settings from /work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/wandb/settings
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_setup.py:_flush():67] Loading settings from environment variables
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_init.py:setup_run_log_directory():662] Logging user logs to /work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/wandb/run-20250411_160408-y9jptsbk/logs/debug.log
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_init.py:setup_run_log_directory():663] Logging internal logs to /work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/wandb/run-20250411_160408-y9jptsbk/logs/debug-internal.log
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_init.py:init():781] calling init triggers
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_init.py:init():786] wandb.init called with sweep_config: {}
+config: {'_wandb': {}}
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_init.py:init():809] starting backend
+2025-04-11 16:04:08,553 INFO    MainThread:1225808 [wandb_init.py:init():813] sending inform_init request
+2025-04-11 16:04:08,556 INFO    MainThread:1225808 [backend.py:_multiprocessing_setup():101] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2025-04-11 16:04:08,556 INFO    MainThread:1225808 [wandb_init.py:init():823] backend started and connected
+2025-04-11 16:04:08,556 INFO    MainThread:1225808 [wandb_init.py:init():915] updated telemetry
+2025-04-11 16:04:08,567 INFO    MainThread:1225808 [wandb_init.py:init():939] communicating run to backend with 90.0 second timeout

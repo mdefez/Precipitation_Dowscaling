@@ -1,0 +1,15 @@
+{"time":"2025-04-11T16:42:18.362570035+02:00","level":"INFO","msg":"stream: starting","core version":"0.19.9","symlink path":"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/wandb/run-20250411_164218-bkgypex6/logs/debug-core.log"}
+{"time":"2025-04-11T16:42:18.619764986+02:00","level":"INFO","msg":"created new stream","id":"bkgypex6"}
+{"time":"2025-04-11T16:42:18.619819308+02:00","level":"INFO","msg":"stream: started","id":"bkgypex6"}
+{"time":"2025-04-11T16:42:18.620658721+02:00","level":"INFO","msg":"handler: started","stream_id":"bkgypex6"}
+{"time":"2025-04-11T16:42:18.620692354+02:00","level":"INFO","msg":"writer: Do: started","stream_id":"bkgypex6"}
+{"time":"2025-04-11T16:42:18.620814242+02:00","level":"INFO","msg":"sender: started","stream_id":"bkgypex6"}
+{"time":"2025-04-11T16:42:18.854986339+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-04-11T16:49:21.184956422+02:00","level":"INFO","msg":"stream: closing","id":"bkgypex6"}
+{"time":"2025-04-11T16:49:21.184989423+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-04-11T16:49:21.185085874+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-04-11T16:49:22.054463986+02:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-04-11T16:49:22.248775008+02:00","level":"INFO","msg":"handler: closed","stream_id":"bkgypex6"}
+{"time":"2025-04-11T16:49:22.248809001+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":"bkgypex6"}
+{"time":"2025-04-11T16:49:22.248945808+02:00","level":"INFO","msg":"sender: closed","stream_id":"bkgypex6"}
+{"time":"2025-04-11T16:49:22.250036792+02:00","level":"INFO","msg":"stream: closed","id":"bkgypex6"}

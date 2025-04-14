@@ -1,0 +1,140 @@
+CUDA available : True
+Number of GPUs : 1
+GPU name : NVIDIA A100-PCIE-40GB MIG 3g.20gb
+Training of the split : 1
+Training tiles : [(0, 1), (1, 2), (2, 3), (3, 0), (0, 2), (1, 3), (2, 0), (3, 1), (0, 3), (1, 0), (2, 1), (3, 2)]
+Validating tiles : [(0, 0), (1, 1), (2, 2), (3, 3)]
+Data loading
+/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/utils/data/dataloader.py:624: UserWarning: This DataLoader will create 4 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(
+Data loaded
+Training
+Epoch 1
+/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/utils/data/dataloader.py:624: UserWarning: This DataLoader will create 4 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(
+Training progress : 0.00%
+Training progress : 0.20%
+Training progress : 0.40%
+Training progress : 0.60%
+Training progress : 0.79%
+Training progress : 0.99%
+Training progress : 1.19%
+Training progress : 1.39%
+Training progress : 1.59%
+Training progress : 1.79%
+Training progress : 1.98%
+Training progress : 2.18%
+Training progress : 2.38%
+Training progress : 2.58%
+Training progress : 2.78%
+Training progress : 2.98%
+Training progress : 3.17%
+Training progress : 3.37%
+Training progress : 3.57%
+Training progress : 3.77%
+Training progress : 3.97%
+Training progress : 4.17%
+Training progress : 4.37%
+Training progress : 4.56%
+Training progress : 4.76%
+Training progress : 4.96%
+Training progress : 5.16%
+Training progress : 5.36%
+Training progress : 5.56%
+Training progress : 5.75%
+Training progress : 5.95%
+Training progress : 6.15%
+Training progress : 6.35%
+Training progress : 6.55%
+Training progress : 6.75%
+Training progress : 6.94%
+Training progress : 7.14%
+Training progress : 7.34%
+Training progress : 7.54%
+Training progress : 7.74%
+Training progress : 7.94%
+Training progress : 8.13%
+Training progress : 8.33%
+Training progress : 8.53%
+Training progress : 8.73%
+Training progress : 8.93%
+Training progress : 9.13%
+Training progress : 9.33%
+Training progress : 9.52%
+Training progress : 9.72%
+Training progress : 9.92%
+Training progress : 10.12%
+Training progress : 10.32%
+Training progress : 10.52%
+Training progress : 10.71%
+Training progress : 10.91%
+Training progress : 11.11%
+Training progress : 11.31%
+Training progress : 11.51%
+Training progress : 11.71%
+Training progress : 11.90%
+Training progress : 12.10%
+Training progress : 12.30%
+Training progress : 12.50%
+Training progress : 12.70%
+Training progress : 12.90%
+Training progress : 13.10%
+Training progress : 13.29%
+Training progress : 13.49%
+Training progress : 13.69%
+Training progress : 13.89%
+Training progress : 14.09%
+Training progress : 14.29%
+Training progress : 14.48%
+Training progress : 14.68%
+Training progress : 14.88%
+Training progress : 15.08%
+Training progress : 15.28%
+Training progress : 15.48%
+Training progress : 15.67%
+Training progress : 15.87%
+Training progress : 16.07%
+Training progress : 16.27%
+Training progress : 16.47%
+Training progress : 16.67%
+Training progress : 16.87%
+Training progress : 17.06%
+Training progress : 17.26%
+Training progress : 17.46%
+Training progress : 17.66%
+Training progress : 17.86%
+Training progress : 18.06%
+Training progress : 18.25%
+Training progress : 18.45%
+Traceback (most recent call last):
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/CV.py", line 81, in <module>
+    weights, loss = train(train_dataset, val_dataset, batch_size, epochs, scheduler, learning_rate, split = k)
+                    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/train.py", line 71, in train
+    loss.backward()                         # Compute the gradients
+    ~~~~~~~~~~~~~^^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/_tensor.py", line 626, in backward
+    torch.autograd.backward(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, gradient, retain_graph, create_graph, inputs=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/autograd/__init__.py", line 347, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/autograd/graph.py", line 823, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn

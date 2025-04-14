@@ -88,7 +88,7 @@ def get_dem(hor, vert):
     return dem
 
 # Compute the timestep we need to have the target (to train or test)
-def timestep_of_interest_target(year, n_days = 5):
+def timestep_of_interest_target(year, n_days = 15):
     list_files = []
     for month in range(1, 13):
         month = str(month).zfill(2)
@@ -120,7 +120,7 @@ def save_target_data(output_folder, year): # Usually output = "../../../downscal
 
                 np.save(f"{output_folder}/{year}/tile_hor_{hor}_vert_{vert}/{timestep}.npy", tile)
 
-# save_target_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data", "2024")
+# save_target_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data", "2023")
 
 # Downsample the data to create the input
 def save_input_data(output_folder, year): # Usually output = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data"
@@ -137,7 +137,7 @@ def save_input_data(output_folder, year): # Usually output = "/work/FAC/FGSE/IDY
                                  area = "RNB")
 
 
-# save_input_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data", "2024")
+save_input_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data", "2024")
 
 # Save the DEM data tile by tile in the same folder as the coarse inpur data
 def save_dem(output_folder): 
@@ -175,5 +175,5 @@ def plot_example():
     plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/CV_pipeline/Images/low_res.png")
     plt.close()
 
-plot_example()
+# plot_example()
 

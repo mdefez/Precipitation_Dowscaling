@@ -8,37 +8,38 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from model import UNet
-from dataset import RainSuperResDataset
-import os 
-import matplotlib.pyplot as plt 
+import wandb
 
-
-learning_rate = 1e-4
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Train the model a,d returns the average loss & the weights
-def train(train_dataset, test_dataset, batch_size, epochs, learning_rate = 1e-4, testing = True, saving = False, save_dir = None):
+def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, loss_function = nn.L1Loss() ,testing = True, saving = False, save_dir = None, split = None):
 
     assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
     assert testing == False or isinstance(test_dataset, Dataset), "Can't test, test dataset not a torch dataset"
     assert isinstance(train_dataset, Dataset), "Train dataset not a torch dataset"
 
+    name_scheduler, epoch_batch, scheduler = strategy_scheduler # (Name of the schedule, Time where we need to update the scheduler, Scheduler object)
+
+    # To plot the loss on WandB, the run name stores the training features
+    wandb.init(project='test', entity='mdefez-cv', name = f"Batch  : {batch_size}, Epoch : {epochs}, LR : {learning_rate}, Scheduler : {name_scheduler}") 
+
     # Load the dataset
     print("Data loading")
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     try: # One can set no test dataset
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
     except:
         test_loader = None
     print("Data loaded")
 
     # Define the model, loss function & optimizer
     model = UNet().to(device)
-    criterion = nn.MSELoss()  
+    criterion = loss_function
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
+    scheduler = scheduler(optimizer = optimizer) # We use a scheduler to control the global learning rate
 
     # Training
     print("Training")
@@ -52,7 +53,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, learning_rate = 1e-4,
         n = train_dataset.__len__()
         
         for inp0, inp1, channel, target in train_loader:
-            print(f"Training progress : {100*progress/n}%")
+            print(f"Training progress : {100*progress/n:.2f}%")
             progress += batch_size
 
             inp0, inp1, channel, target = inp0.to(device), inp1.to(device), channel.to(device), target.to(device)
@@ -66,7 +67,17 @@ def train(train_dataset, test_dataset, batch_size, epochs, learning_rate = 1e-4,
 
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(train_loader)
+            if epoch_batch == "batch":
+                scheduler.step() # Tune the learning rate value
+
+        
+
+        if epoch_batch == "epoch":
+            scheduler.step() # Tune the learning rate value
+
+        avg_loss = total_loss / len(train_loader) # Compute the aberage loss over the epoch
+
+        wandb.log({f"Loss split {split}": avg_loss}) # Plot the loss on the website
         print(f"Epoch {epoch}/{epochs} - Loss: {avg_loss:.4f}")
 
     loss_to_return = avg_loss # If one is only training, the function returns the training loss
@@ -83,7 +94,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, learning_rate = 1e-4,
         n = test_dataset.__len__()
         with torch.no_grad():
             for inp0, inp1, channel, target in test_loader:
-                print(f"Testing progress : {100*k/n}%")
+                print(f"Testing progress : {100*k/n:.2f}%")
                 k += batch_size 
 
                 inp0, inp1, channel, target = inp0.to(device), inp1.to(device), channel.to(device), target.to(device)

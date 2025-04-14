@@ -1,0 +1,55 @@
+Data loading
+/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/utils/data/dataloader.py:624: UserWarning: This DataLoader will create 4 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(
+Data loaded
+Training
+Epoch 1
+/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/utils/data/dataloader.py:624: UserWarning: This DataLoader will create 4 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(
+Training progress : 0.00%
+Training progress : 0.79%
+Traceback (most recent call last):
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/CV.py", line 94, in <module>
+    weights, loss = train(train_dataset=train_dataset,
+                    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                          test_dataset=val_dataset,
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+                          loss_function=loss_function,
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                          split = k)
+                          ^^^^^^^^^^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/train.py", line 62, in train
+    output = model(inp0, inp1, channel)     # Compute the output
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/model.py", line 137, in forward
+    output_non_null = self.unet_forward(x_non_null)
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/model.py", line 104, in unet_forward
+    output = self.output_layer(dec1)
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/container.py", line 250, in forward
+    input = module(input)
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 554, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/mamba_root/envs/stvd/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 549, in _conv_forward
+    return F.conv2d(
+           ~~~~~~~~^
+        input, weight, bias, self.stride, self.padding, self.dilation, self.groups
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+KeyboardInterrupt

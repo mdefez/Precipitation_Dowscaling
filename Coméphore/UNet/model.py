@@ -1,6 +1,7 @@
 # The goal of this script is to implement a UNet class
 # The model takes 3 channels as input (2 low res frames and DEM) and returns 6 high res frames
 
+from importlib.metadata import requires
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -49,8 +50,8 @@ class UNet(nn.Module):
         return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            #nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            #nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
             nn.BatchNorm2d(out_channels)
         )
 
@@ -62,6 +63,7 @@ class UNet(nn.Module):
             nn.Conv2d(in_channels, interm_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(interm_channels, out_channels, kernel_size=1), # 1x1 convolution as final step
+            nn.ReLU(inplace=True) # Because we only seek for positive data
         )
 
     def unet_forward(self, x): # Be careful, this is only the UNet block, the "real" forward is below
@@ -83,6 +85,7 @@ class UNet(nn.Module):
 
         # Decoder 
         dec4 = self.upconv4(bottleneck)
+        dec4 = self.pad_to_match(dec4, conv4)   # Pad with 0 so that we can concatenate the two tensors
         dec4 = torch.cat([dec4, conv4], dim=1)  # Skip connection
 
         dec3 = self.upconv3(dec4)
@@ -90,9 +93,11 @@ class UNet(nn.Module):
         dec3 = torch.cat([dec3, conv3], dim=1)
 
         dec2 = self.upconv2(dec3)
+        dec2 = self.pad_to_match(dec2, conv2) 
         dec2 = torch.cat([dec2, conv2], dim=1)
 
         dec1 = self.upconv1(dec2)
+        dec1 = self.pad_to_match(dec1, conv1) 
         dec1 = torch.cat([dec1, conv1], dim=1)
 
         # Final layer
@@ -102,23 +107,48 @@ class UNet(nn.Module):
     
     def forward(self, inp0, inp1, inp2): # This upsamples the 2 first channels and pass the 3 channels to the UNet
 
-        # If both input are all zeroes, then we force the predictions to be zero. Otherwise, usual pipeline
-        if (inp0.abs().sum() == 0) and (inp1.abs().sum() == 0):
+        # Before anything, if both input images are all zeroes, then we force the predictions to be zero. Otherwise, we pass it to the unet
 
-            B = inp0.size(0)    
-            device = inp0.device
-            out_shape = (B, 3, 100, 100)  # We compute the output shape
-            return torch.zeros(out_shape, device=device)
+        # Create all outputs to zeros
+        batch_size = inp0.size(0)
+        outputs = torch.zeros(batch_size, 6, 100, 100, device=inp0.device)  
+        
+        # Check if for some sample, both input images are all zeros
+        all_zero_inp0 = torch.all(inp0 == 0, dim=(-2, -1))  # [B]
+        all_zero_inp1 = torch.all(inp1 == 0, dim=(-2, -1))  # [B]
 
-        # Upsample the 2 frames with bicubic interpolation
-        inp0_up = F.interpolate(inp0, size=(100, 100), mode='bicubic', align_corners=False)
-        inp1_up = F.interpolate(inp1, size=(100, 100), mode='bicubic', align_corners=False)
+        non_null_mask = ~(all_zero_inp0 & all_zero_inp1)  # [B], True if not entirely 0
 
-        # Concatenate the new input
-        x_up = torch.cat([inp0_up, inp1_up, inp2], dim=1)
+        # If not 0, pass them to the UNet. The UNet itself never sees any all zeroes frames
+        if non_null_mask.any():
+            # We only pass the non zero samples
+            inp0_non_null = inp0[non_null_mask].unsqueeze(1)
+            inp1_non_null = inp1[non_null_mask].unsqueeze(1)
+            inp2_non_null = inp2[non_null_mask].unsqueeze(1)
 
-        # Pass it to the UNet
-        return self.unet_forward(x_up)
+            # Upsample the 2 frames with bicubic interpolation
+            inp0_up = F.interpolate(inp0_non_null, size=(100, 100), mode='bicubic', align_corners=False)
+            inp1_up = F.interpolate(inp1_non_null, size=(100, 100), mode='bicubic', align_corners=False)
+
+            # Concat the non zeros sample to build a new "batch", with fewer samples than the inital ones (we made the all zeros go away)
+            x_non_null = torch.cat((inp0_up, inp1_up, inp2_non_null), dim=1)  # [B', 3, H, W] où B' est le nombre d'échantillons non nuls
+
+            # Pass it to the UNet
+            output_non_null = self.unet_forward(x_non_null)
+
+            # Setting the outputs
+            outputs[non_null_mask.squeeze()] = output_non_null  # [B, 6, H, W]
+        
+
+        else: # If all the batch is all zero (it might happened when the batch_size is low), we have to force the tensor to allow gradient computing
+            outputs = torch.zeros(batch_size, 6, 100, 100, device=inp0.device, requires_grad = True)  
+
+        return outputs  
+
+
+
+
+
 
 
 

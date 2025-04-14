@@ -1,0 +1,15 @@
+{"time":"2025-04-11T17:15:26.716543573+02:00","level":"INFO","msg":"stream: starting","core version":"0.19.9","symlink path":"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/wandb/run-20250411_171526-npya0jwb/logs/debug-core.log"}
+{"time":"2025-04-11T17:15:26.975488122+02:00","level":"INFO","msg":"created new stream","id":"npya0jwb"}
+{"time":"2025-04-11T17:15:26.975551791+02:00","level":"INFO","msg":"stream: started","id":"npya0jwb"}
+{"time":"2025-04-11T17:15:26.976425668+02:00","level":"INFO","msg":"handler: started","stream_id":"npya0jwb"}
+{"time":"2025-04-11T17:15:26.976465603+02:00","level":"INFO","msg":"writer: Do: started","stream_id":"npya0jwb"}
+{"time":"2025-04-11T17:15:26.976617067+02:00","level":"INFO","msg":"sender: started","stream_id":"npya0jwb"}
+{"time":"2025-04-11T17:15:27.205653774+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-04-11T17:15:31.57330479+02:00","level":"INFO","msg":"stream: closing","id":"npya0jwb"}
+{"time":"2025-04-11T17:15:31.573345206+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-04-11T17:15:31.573485629+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-04-11T17:15:32.164643927+02:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-04-11T17:15:32.360773182+02:00","level":"INFO","msg":"handler: closed","stream_id":"npya0jwb"}
+{"time":"2025-04-11T17:15:32.360796034+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":"npya0jwb"}
+{"time":"2025-04-11T17:15:32.360984838+02:00","level":"INFO","msg":"sender: closed","stream_id":"npya0jwb"}
+{"time":"2025-04-11T17:15:32.36189879+02:00","level":"INFO","msg":"stream: closed","id":"npya0jwb"}
