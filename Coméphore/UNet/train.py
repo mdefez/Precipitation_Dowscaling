@@ -7,7 +7,8 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-from model import UNet
+from baseline import UNet
+from UNet_attention import UNet_with_attention
 import wandb
 
 
@@ -15,28 +16,40 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Train the model a,d returns the average loss & the weights
-def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, loss_function = nn.L1Loss() ,testing = True, saving = False, save_dir = None, split = None):
+def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
+          temp_factor, spatial_factor, loss_function = nn.L1Loss(), 
+          testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
 
     assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
     assert testing == False or isinstance(test_dataset, Dataset), "Can't test, test dataset not a torch dataset"
     assert isinstance(train_dataset, Dataset), "Train dataset not a torch dataset"
+    assert isinstance(name_run, str), "The name of the run is not a string"
 
     name_scheduler, epoch_batch, scheduler = strategy_scheduler # (Name of the schedule, Time where we need to update the scheduler, Scheduler object)
 
     # To plot the loss on WandB, the run name stores the training features
-    wandb.init(project='test', entity='mdefez-cv', name = f"Batch  : {batch_size}, Epoch : {epochs}, LR : {learning_rate}, Scheduler : {name_scheduler}") 
+    wandb.init(project='test', entity='mdefez-cv', name = name_run) 
 
     # Load the dataset
     print("Data loading")
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
     try: # One can set no test dataset
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
     except:
         test_loader = None
     print("Data loaded")
 
     # Define the model, loss function & optimizer
-    model = UNet().to(device)
+    if asked_model == "UNet":
+        model = UNet(temp_factor=temp_factor, spatial_factor=spatial_factor, hard_constraint_mass=model_parameters[0]).to(device)
+    
+    elif asked_model == "UNet_with_attention":
+        model = UNet_with_attention(temp_factor=temp_factor, 
+                                    spatial_factor=spatial_factor, 
+                                    hard_constraint_mass=model_parameters[0],
+                                    n_inputs=model_parameters[1]).to(device)
+
+    # Define the loss function & optimizer
     criterion = loss_function
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = scheduler(optimizer = optimizer) # We use a scheduler to control the global learning rate
@@ -52,13 +65,15 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         progress = 0 
         n = train_dataset.__len__()
         
-        for inp0, inp1, channel, target in train_loader:
+        for list_low_res, channel, target in train_loader:
             print(f"Training progress : {100*progress/n:.2f}%")
             progress += batch_size
 
-            inp0, inp1, channel, target = inp0.to(device), inp1.to(device), channel.to(device), target.to(device)
-
-            output = model(inp0, inp1, channel)     # Compute the output
+            channel, target = channel.to(device), target.to(device)
+            for k in range(len(list_low_res)):
+                list_low_res[k] = list_low_res[k].to(device)
+            
+            output = model(list_low_res, channel)     # Compute the output
             loss = criterion(output, target)        # Compute the loss
 
             optimizer.zero_grad()                   # Set the gradients to 0
@@ -90,16 +105,18 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         total_test_loss = 0
 
         # To compute progress over testing
-        k = 0 
+        p = 0 
         n = test_dataset.__len__()
         with torch.no_grad():
-            for inp0, inp1, channel, target in test_loader:
-                print(f"Testing progress : {100*k/n:.2f}%")
-                k += batch_size 
+            for list_low_res, channel, target in test_loader:
+                print(f"Testing progress : {100*p/n:.2f}%")
+                p += batch_size 
 
-                inp0, inp1, channel, target = inp0.to(device), inp1.to(device), channel.to(device), target.to(device)
+                channel, target = channel.to(device), target.to(device)
+                for k in range(len(list_low_res)):
+                    list_low_res[k] = list_low_res[k].to(device)
 
-                output = model(inp0, inp1, channel)
+                output = model(list_low_res, channel)
 
                 test_loss = criterion(output, target)
                 total_test_loss += test_loss.item()

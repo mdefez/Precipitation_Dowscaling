@@ -123,21 +123,22 @@ def save_target_data(output_folder, year): # Usually output = "../../../downscal
 # save_target_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data", "2023")
 
 # Downsample the data to create the input
-def save_input_data(output_folder, year): # Usually output = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data"
+def save_input_data(output_folder, year, spatial_factor, temp_factor): # Usually output = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data"
     for hor in range(nb_tile_horizontal):
         for vert in range(nb_tile_vertical):
             print(hor, vert)
             # Get the dem file
             input_folder = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data/{year}/tile_hor_{hor}_vert_{vert}"
-            output_folder_tile = os.path.join(output_folder, year, f"tile_hor_{hor}_vert_{vert}")
+            output_folder_tile = os.path.join(output_folder, f"spatial_{spatial_factor}_temp_{temp_factor}", year, f"tile_hor_{hor}_vert_{vert}")
 
             tool.process_input(input_folder = input_folder, 
-                               interm_folder = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/interm_data/{year}/tile_hor_{hor}_vert_{vert}",
-                                 output_folder = output_folder_tile, temp_factor = 6, spatial_factor = 25,
+                               interm_folder = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/interm_data/spatial{spatial_factor}_temp_{temp_factor}/{year}/tile_hor_{hor}_vert_{vert}",
+                                 output_folder = output_folder_tile, temp_factor = temp_factor, spatial_factor = spatial_factor,
                                  area = "RNB")
 
 
-save_input_data("/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data", "2024")
+save_input_data(f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data",
+                 "2023", spatial_factor=10, temp_factor=1)
 
 # Save the DEM data tile by tile in the same folder as the coarse inpur data
 def save_dem(output_folder): 

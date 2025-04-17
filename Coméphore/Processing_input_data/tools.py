@@ -15,7 +15,6 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.interpolate import griddata
 import geopandas as gpd
 from shapely.geometry import Point
-import ipdb
 
 # Example of path to projected data
 path_projected = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019/Projected_2019020918_RR.gtif"
@@ -453,7 +452,7 @@ def temporal_downsampling(input_directory, output_directory, temp_factor, area =
         # If the list does not exist yet
         if count == 0:
             timestep_name = df_filename.iloc[k]["timestep"]
-            if str(timestep_name)[6:10] == "0101" and area == "RNB": # The first aggregated raster of each month will have only 5 rasters
+            if str(timestep_name)[6:10] == "0101" and area == "RNB" and temp_factor == 6: # The first aggregated raster of each month will have only 5 rasters
                 count = 1
             time_groups[f"beggining_{timestep_name}_temp_factor_{temp_factor}"] = []
 

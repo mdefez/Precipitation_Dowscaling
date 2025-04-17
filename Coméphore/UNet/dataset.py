@@ -1,9 +1,9 @@
 # The goal of this script is to develop a dataset class to feed the dataloader
 # Each dataset is defined for a specific tile
-# The class should have a __getitem__ method that return an input & output to the model : 
-#   - 2 (following) low res frames on the same tile
+# The class should have a __getitem__ method that return an input & target to the model : 
+#   - n following low res frames on the same tile, where n can be chosen
 #   - the tile's DEM 
-#   - the 6 correspondings targets
+#   - the 6 targets corresponding to the last low res frame
 
 import os
 import numpy as np
@@ -12,8 +12,11 @@ from torch.utils.data import Dataset
 import torch.nn.functional as F
 
 class RainSuperResDataset(Dataset):
-    def __init__(self, input_root, output_root, channel_root, hor, vert, train=True): # Channel refers to the DEM
+    def __init__(self, input_root, output_root, channel_root, hor, vert, temp_factor, spatial_factor, train=True, n_days = 5, n_inputs = 1): # Channel refers to the DEM
         self.samples = [] # This is a list of all the inputs
+
+        self.temp_factor = temp_factor
+        self.spatial_factor = spatial_factor
 
         # Folder where the data is stored
         self.input_root = input_root
@@ -24,6 +27,7 @@ class RainSuperResDataset(Dataset):
         self.domain = f"tile_hor_{self.hor}_vert_{self.vert}"     # Name of the domain, given the coordinates        
 
         # We train on 2023 & test on 2024
+        self.n_days = n_days # We only use the n-th first days of each month
         if train:
             years = ['2023'] 
         else:
@@ -33,26 +37,35 @@ class RainSuperResDataset(Dataset):
         # Add all the inputs to the list
         for year in years:
             input_files = sorted(os.listdir(os.path.join(input_root, year, self.domain))) # Select the right tile
+            input_files = [file for file in input_files if int(file[16:18]) < self.n_days] # We only use the n-th first days of each month
             input_times = [int(f[10:20]) for f in input_files] # Get timesteps from the filename
             input_times.sort()
 
-            # We select consecutive images if there is a 6 hour gap 
-            for i in range(len(input_times) - 1): 
+            # We select n consecutive images if there is a 6 hour gap between each
+            for i in range(len(input_times) - (n_inputs - 1)): 
                 t0 = input_times[i]
-                t1 = input_times[i + 1]
-                if t1 - t0 == 6:  # Add the couple to the list of samples
-                    self.samples.append({
-                        "year": year,
-                        "domain": self.domain,   # DEM
-                        "t0": t0,           # First frame
-                        "t1": t1            # Last frame
-                    })
+                following_frames = [t0]
+                add_the_sample = True
+                for k in range(1, n_inputs): # We loop until n - 1 to have exaclty n inputs
+                    t_next = input_times[i + k]
+                    following_frames.append(t_next)
+                    if t_next % 10 == 1 and self.temp_factor == 6: # Samples that starts at 1AM are corrupted
+                        add_the_sample = False
+                
+                
+                if add_the_sample == True: # All following frames are temp_factor hours away and the sample should be add
+                    dict_to_add = {"year": year,
+                            "domain": self.domain,   # DEM
+                    }
+                    dict_to_add["low_res_idx"] = following_frames
+
+                    self.samples.append(dict_to_add)
 
     def __len__(self):
         return len(self.samples)
     
     def input_format(self, timestep): # Return the correct input filename corresponding to the timestep
-        return f"beggining_{timestep}_temp_factor_6_spatial_factor_25.npy"
+        return f"beggining_{timestep}_temp_factor_{self.temp_factor}_spatial_factor_{self.spatial_factor}.npy"
     
     def target_format(self, timestep): # Return the correct output filename corresponding to the timestep
         return f"{timestep}.npy"
@@ -62,39 +75,30 @@ class RainSuperResDataset(Dataset):
         vert = domain[16]
         return f"dem_hor_{hor}_vert_{vert}.npy"
 
-    def __getitem__(self, idx): # Return (image_timestep_t, image_timestep_t+1, dem, target), basically (input, target)
+    def __getitem__(self, idx): # Return (list of low frames, dem, target), basically (input, target)
         sample = self.samples[idx]
         year = sample["year"]
         domain = sample["domain"]
-        t0 = sample["t0"]
-        t1 = sample["t1"]
+        low_res_idx = sample["low_res_idx"]
 
         # Load the low res inputs
-        inp0 = np.load(os.path.join(self.input_root, year, domain, self.input_format(t0)))
-        inp1 = np.load(os.path.join(self.input_root, year, domain, self.input_format(t1)))
-
-        inp0 = torch.tensor(inp0).unsqueeze(0).unsqueeze(0).float()
-        inp1 = torch.tensor(inp1).unsqueeze(0).unsqueeze(0).float()
+        low_res_frames = [np.load(os.path.join(self.input_root, year, domain, self.input_format(t))) for t in low_res_idx]
+        # Transform into tensors
+        low_res_tensors = [torch.tensor(npy).unsqueeze(0).unsqueeze(0).float() for npy in low_res_frames] # List of (1, H, W)
 
         # Load the DEM
         channel = np.load(os.path.join(self.channel_root, self.dem_name(domain)))
-        channel = torch.tensor(channel).unsqueeze(0).float() 
+        channel = torch.tensor(channel).unsqueeze(0).float() # (1, H, W)
 
         # Load the high res targets
         targets = []
 
-        # We have to select 6 targets between t0 and t1 + 5, different strategies are possible because there are 12 images
-        def strategy(t0, t1): # Selects the index corresponding to the time steps
-            strat_1 = range(t0, t1) 
-            strat_2 = range(t0 + 3, t1 + 3)
-
-            return strat_2
-
-        for t in strategy(t0, t1):  
+        # We have to select the 6 targets corresponding to the last low res frame
+        for t in range(low_res_idx[-1], low_res_idx[-1] + self.temp_factor):  
             target_path = os.path.join(self.output_root, year, domain, self.target_format(t))
             target = np.load(target_path)
             targets.append(torch.tensor(target).unsqueeze(0).float())
         targets = torch.stack(targets) 
-        targets = targets.squeeze(1)
+        targets = targets.squeeze(1) # (temp_factor, H, W)
 
-        return inp0.squeeze(0), inp1.squeeze(0), channel, targets
+        return low_res_tensors, channel, targets

@@ -1,14 +1,23 @@
 # The goal of this script is to implement a UNet class
 # The model takes 3 channels as input (2 low res frames and DEM) and returns 6 high res frames
 
-from importlib.metadata import requires
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class UNet(nn.Module):
-    def __init__(self):
+    def __init__(self, hard_constraint_mass, temp_factor, spatial_factor):
         super(UNet, self).__init__()
+
+        # Define the hard constraint mass strategy (None, additive or multiplicative)
+        assert hard_constraint_mass == None or hard_constraint_mass == "additive" or len(hard_constraint_mass) == 2, "hard_constraint_mass has the wrong format"
+        assert isinstance(temp_factor, int), "Wrong format for temporal SR factor"
+        assert isinstance(spatial_factor, int), "Wrong format for spatial SR factor"
+        
+        self.hard_constraint_mass = hard_constraint_mass
+        self.temp_factor = temp_factor
+        self.spatial_factor = spatial_factor
 
         # Encoder
         self.encoder1 = self.conv_block(3, 64)  # 3 input channels 
@@ -68,6 +77,7 @@ class UNet(nn.Module):
 
     def unet_forward(self, x): # Be careful, this is only the UNet block, the "real" forward is below
         # Encoder 
+        
         conv1 = self.encoder1(x)
         pool1 = self.encoder_pool(conv1) # We use two separate layers for convolution & pooling to keep track of the convolution's output, we can later concatenate in the decoder
 
@@ -79,6 +89,7 @@ class UNet(nn.Module):
 
         conv4 = self.encoder4(pool3)
         pool4 = self.encoder_pool(conv4)
+        
 
         # Bottleneck 
         bottleneck = self.bottleneck(pool4)
@@ -107,6 +118,7 @@ class UNet(nn.Module):
     
     def forward(self, inp0, inp1, inp2): # This upsamples the 2 first channels and pass the 3 channels to the UNet
 
+        ### FIRST STEP
         # Before anything, if both input images are all zeroes, then we force the predictions to be zero. Otherwise, we pass it to the unet
 
         # Create all outputs to zeros
@@ -119,6 +131,7 @@ class UNet(nn.Module):
 
         non_null_mask = ~(all_zero_inp0 & all_zero_inp1)  # [B], True if not entirely 0
 
+        ### SECOND STEP
         # If not 0, pass them to the UNet. The UNet itself never sees any all zeroes frames
         if non_null_mask.any():
             # We only pass the non zero samples
@@ -134,11 +147,33 @@ class UNet(nn.Module):
             x_non_null = torch.cat((inp0_up, inp1_up, inp2_non_null), dim=1)  # [B', 3, H, W] où B' est le nombre d'échantillons non nuls
 
             # Pass it to the UNet
+
             output_non_null = self.unet_forward(x_non_null)
+
+            ### THIRD STEP
+            # Here we apply (if asked) the hard constraint mass strategy
+            if self.hard_constraint_mass != None:
+                if self.hard_constraint_mass == "additive":
+                    pass 
+
+                else: # This is thus the multiplicative strategy
+                    strategy, f = self.hard_constraint_mass
+
+                    f_output = f(output_non_null)  # shape: (B', 6, 100, 100)
+
+                    # Be careful, here we take inp0 as the "initial Low Res" but it might be better to take inp1 or any mean, it depends on the strategy. 
+                    P_LR = inp0_non_null.sum(dim=(2, 3), keepdim = True) * self.temp_factor     # Shape (B')
+
+                    # Compute the sum at the denominator
+                    sum_f = f_output.sum(dim=(1, 2, 3), keepdim=True) / (self.spatial_factor ** 2) # shape: (B', 1, 1, 1)
+
+                    # Compute the final (constrained) outputs
+                    output_final = f_output * (P_LR / sum_f)   # shape: (B', 6, 100, 100)
+                    output_non_null = output_final                      # Rename it
 
             # Setting the outputs
             outputs[non_null_mask.squeeze()] = output_non_null  # [B, 6, H, W]
-        
+
 
         else: # If all the batch is all zero (it might happened when the batch_size is low), we have to force the tensor to allow gradient computing
             outputs = torch.zeros(batch_size, 6, 100, 100, device=inp0.device, requires_grad = True)  
