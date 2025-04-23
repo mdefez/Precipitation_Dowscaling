@@ -9,27 +9,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import ConcatDataset
 from loss import CustomLoss
 import numpy as np
-
-# Super resolution factors
-temp_factor = 1
-spatial_factor = 10
-n_inputs = 6        # Frames to take into account as input
-
-name_of_the_run = "cv_hard_attention_l2" + f"spatial_{spatial_factor}_temp_{temp_factor}_input_{n_inputs}"
-
-# Data directories
-input_dir = f'/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/spatial_{spatial_factor}_temp_{temp_factor}'          # Low res frames
-output_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data'        # High res targets
-channel_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/DEM'    # DEM
-
-# We set the batch size to 1 to compute the loss for each input/ouput, thus we can save the worst/best predictions
-batch_size = 1
-
-available_strategy_mass = [None, "additive", ("multiplicative", "a function type that operates on tensors")] # The function should apply element wise for tensors
-def f_mass(x): # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and i thould not diverge when x is big
-    return (x+1)**2
-
-strategy_mass = ("multiplicative", f_mass)
+import tools as tool
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -38,43 +18,42 @@ def plot_img(image, is_precip, nb_slot, position, title, nb_column = 2):
     plt.subplot(nb_slot, nb_column, position)
 
     if is_precip:
-        plt.imshow(image, cmap='viridis', vmin = 0, vmax=10)
+        plt.imshow(image, cmap='viridis', vmin = 0, vmax = 0.1)
         plt.colorbar(label = "Precipitation (mm)")
         plt.axis("off")
 
     else:
-        plt.imshow(image, cmap='terrain')
+        plt.imshow(image, cmap='terrain', vmin = 0, vmax = 1)
         plt.colorbar(label = "Elevation (m)")
+        plt.axis("off")
 
     plt.title(title)
 
 # Function to plot all the relevant images and save them
-def save_images(list_input, predictions, dem, targets, bot_or_top = None, 
-                output_dir=f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/Images_{name_of_the_run}', sample = None):
+def save_images(list_input, predictions, dem, targets, output_dir, bot_or_top = None, best_worst = False):
 
     os.makedirs(output_dir, exist_ok=True)
-
+    for folder in ["Random", "Lowest", "Best"]:
+        os.makedirs(os.path.join(output_dir, folder), exist_ok=True)
+    
     # We save n examples per epoch
-    for i in range(len(predictions)): 
-        try:
-            pred_img = predictions[i].cpu().detach().numpy()               # Predictions
-            target_img = targets[i].cpu().detach().numpy()                 # Targets
-            list_input_plot = [inp.cpu().detach().numpy().squeeze() for inp in list_input] # frames
-            dem_plot = dem[i].cpu().detach().numpy().squeeze()           # DEM
+    for i in range(min(15, len(predictions))): 
 
-        except:
-            pred_img = predictions[i].cpu().detach().numpy().squeeze(1)             # Predictions
-            target_img = targets[i].cpu().detach().numpy().squeeze(1)                 # Targets
-            list_input_plot = [inp[0].cpu().detach().numpy().squeeze() for inp in list_input] # frames
-            dem_plot = dem[i].cpu().detach().numpy().squeeze()           # DEM
+        pred_img = predictions[i].cpu().detach().numpy()               # Predictions
+        target_img = targets[i].cpu().detach().numpy()                 # Targets
+        if best_worst == False: # If we plot samples from a batch
+            list_input_plot = [inp[i].cpu().detach().numpy().squeeze() for inp in list_input] # frames
+        if best_worst == True: # If we plot samples from the best/worst samples
+            list_input_plot = [inp.cpu().detach().numpy().squeeze() for inp in list_input[i]]
+        dem_plot = dem[i].cpu().detach().numpy().squeeze()           # DEM
 
         # Useful to organize the plot
         num_channels = pred_img.shape[0]
 
         # Number of vertical slots
-        nb_slots = num_channels + 1 + len(list_input) // 2          
+        nb_slots = num_channels + 1 + len(list_input_plot) // 2          
 
-        plt.figure(figsize=(12, 4 * num_channels))
+        plt.figure(figsize=(6, 5 * num_channels))
 
         # Plot DEM & inputs
         plot_img(dem_plot, False, nb_slots, 1, "DEM")
@@ -83,22 +62,22 @@ def save_images(list_input, predictions, dem, targets, bot_or_top = None,
             k += 1
             plot_img(frame, True, nb_slots, 1+k, f"Frame {k}")
 
-        # Loop over the 6 timesteps
+        # Loop over the n timesteps
         for c in range(num_channels):
             # Prediction
-            plot_img(pred_img[c], True, nb_slots, 2*(len(list_input)//2) + 2 + 2*c + 1, f"Prediction - Timestep {c+1}")
+            plot_img(pred_img[c], True, nb_slots, 2*((len(list_input_plot))//2) + 2 + 2*c + 1, f"Prediction - Timestep {c+1}")
 
             # Target
-            plot_img(target_img[c], True, nb_slots, 2*(len(list_input)//2) + 2 + 2*c + 2, f"Target - Timestep {c+1}")
+            plot_img(target_img[c], True, nb_slots, 2*((len(list_input_plot))//2) + 2 + 2*c + 2, f"Target - Timestep {c+1}")
 
         # Save the plot
         # Design the name of the file
         if bot_or_top == "bot":
-            name_file = f"Lowest {len(predictions) - i} file"
+            name_file = f"Lowest/Lowest {len(predictions) - i} file"
         elif bot_or_top == "top":
-            name_file = f"Best {i} file"
+            name_file = f"Best/Best {i + 1} file"
         else:
-            name_file = f"Random {sample} file"
+            name_file = f"Random/Random {i + 1} file"
         plt.savefig(os.path.join(output_dir, f"{output_dir}/{name_file}.png"))
         plt.close()
 
@@ -109,134 +88,171 @@ def load_model(model, filepath):
 
     return model
 
+def test(input_dir, output_dir, channel_dir, 
+         spatial_factor, temp_factor, n_inputs, name_of_the_run,
+         best_transform, criterion, batch_size, asked_model, model_parameters, n_days):
+    
+    output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/Images/{name_of_the_run}'
 
-print("Loading model")
+    print("Loading model")
+    if asked_model == "UNet":
+        pass
+    
+    elif asked_model == "UNet_with_attention":
+        strategy_mass = model_parameters[0]
 
-# Filepath to the .pth file, where are stored the model's weights
-filepath=f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/weights/{name_of_the_run}.pth' # Weights to load
+    # Filepath to the .pth file, where are stored the model's weights
+    filepath=f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/weights/{name_of_the_run}.pth' # Weights to load
 
-model = UNet_with_attention(hard_constraint_mass=strategy_mass, temp_factor=temp_factor, spatial_factor=spatial_factor, n_inputs=n_inputs)  # Set the type of model we are using
-model = load_model(model, filepath)  # Load the weights
-model.to(device)
+    model = UNet_with_attention(hard_constraint_mass=strategy_mass, temp_factor=temp_factor, spatial_factor=spatial_factor, n_inputs=n_inputs)  # Set the type of model we are using
+    model = load_model(model, filepath)  # Load the weights
+    model.to(device)
 
-total_params = sum(p.numel() for p in model.parameters())
-print(f"Total parameters : {total_params}")
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total parameters : {total_params}")
 
 
-# Load the test dataset
-test_dataset = []
-for hor in range(4):
-    for vert in range(4):
-        test_dataset.append(RainSuperResDataset(input_dir, output_dir, channel_dir, hor, vert, temp_factor=temp_factor, 
-                                                train=False, n_days=5, n_inputs=n_inputs, spatial_factor=spatial_factor))
+    # Load the test dataset
+    test_dataset = []
+    for hor in range(4):
+        for vert in range(4):
+            test_dataset.append(RainSuperResDataset(input_dir, output_dir, channel_dir, hor, vert, temp_factor=temp_factor, 
+                                                    train=False, n_days=n_days, n_inputs=n_inputs, spatial_factor=spatial_factor))
 
-test_dataset = ConcatDataset(test_dataset)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
+    test_dataset = ConcatDataset(test_dataset)
+    # Normalize the test data, according to the training one
+    transform_precip, transform_dem = best_transform
 
-# Evaluate
-model.eval()
-total_test_loss = 0
+    normalized_test_dataset = tool.TransformedDataset(base_dataset = test_dataset,
+                                                       transform_precip = transform_precip,
+                                                       transform_dem = transform_dem)
 
-base_loss = nn.MSELoss()
-lambda_conservative = 0.1
-lambda_autocorr = 0.1
-criterion = CustomLoss(base_loss=base_loss,
-                           lambda_conservative=lambda_conservative,
-                           lambda_covariance=lambda_autocorr,
-                           conservative=False,
-                           covariance=False)
+    test_loader = DataLoader(normalized_test_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
 
-# To compute progress
-n = test_dataset.__len__()
-progress = 0
+    # Evaluate
+    model.eval()
+    total_test_loss = 0
 
-# To store the best / worst predictions
-worst_loss = []
-worst_sample = []
+    # To compute progress
+    n = test_dataset.__len__()
+    progress = 0
 
-best_loss = []
-best_sample = []
+    # To store the best / worst predictions
+    worst_loss = []
+    worst_sample = []
 
-def sort_l1_l2(l1, l2): # Sort both list according to the first one
-    l1 = np.array(l1)
-    idx = np.argsort(l1)
+    best_loss = []
+    best_sample = []
 
-    # Réorganisation
-    l1_sorted = list(l1[idx])
-    l2_sorted = [l2[i] for i in idx]
+    def get_first_samples(list_frames, nb):  # Get the first n samples of the batch from a list of inputs (list of batch)
+        samples = []
+        for i in range(len(list_frames)):
+            new_idx = list_frames[i][:nb]
+            samples.append(new_idx)
 
-    return l1_sorted, l2_sorted
+        return samples
+    
+    def get_sample(list_frames, idx):  # Get the sample corresponding to the specified idx of the batch from a list of inputs (list of batch)
+        samples = []
+        for i in range(len(list_frames)):
+            new_idx = list_frames[i][idx]
+            samples.append(new_idx)
 
-plot_first_samples = 1
-samples_to_plot = 5
+        return samples
 
-with torch.no_grad():
-    for list_low_res, channel, target in test_loader:
-        print(f"Testing progress : {progress*100/n:.3f}%")
-        progress += batch_size
+    def sort_l1_l2(l1, l2): # Sort both lists according to the first one 
+        l1 = np.array(l1)
+        idx = np.argsort(l1)
 
-        channel, target = channel.to(device), target.to(device)
-        for k in range(len(list_low_res)):
-            list_low_res[k] = list_low_res[k].to(device)
+        # Réorganisation
+        l1_sorted = list(l1[idx])
+        l2_sorted = [l2[i] for i in idx]
 
-        output = model(list_low_res, channel)     # Compute the output
+        return l1_sorted, l2_sorted
 
-        test_loss = criterion(output, target).item() # Compute the loss
-        total_test_loss += test_loss
+    plot_first_samples = True
+    best_worst_to_plot = 5 # Number of best / worst sample to plot
 
-        # Plot some random predictions for the first batch
-        if plot_first_samples <= samples_to_plot:
-            save_images(list_low_res, output, channel, target, sample=plot_first_samples)
-            plot_first_samples += 1
+    with torch.no_grad():
+        for list_low_res, channel, target in test_loader:
+            print(f"Testing progress : {progress*100/n:.3f}%")
+            progress += batch_size
 
-        # Update if it is a good/bad sample
-        # Fill the list with the first 5 values
-        if len(worst_loss) < 5:
-            # Worst loss
-            worst_loss.append(test_loss)
-            worst_sample.append([list_low_res, output, channel, target])
+            channel, target = channel.to(device), target.to(device)
+            for k in range(len(list_low_res)):
+                list_low_res[k] = list_low_res[k].to(device)
 
-            worst_loss, worst_sample = sort_l1_l2(worst_loss, worst_sample) # Both list are sorted ascendingly 
+            output = model(list_low_res, channel)     # Compute the output
 
-            min_loss_of_the_worst = worst_loss[0]
+            test_loss = criterion(output, target).item() # Compute the average loss
+            loss_vector = criterion.forward_vecteur(output, target) # Compute the marginal loss for each pair of output/target
 
-            # Best loss
-            best_loss.append(test_loss)
-            best_sample.append([list_low_res, output, channel, target])
-            best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
+            total_test_loss += test_loss
 
-            max_loss_of_the_best = best_loss[-1]
+            # Plot some random predictions for the first batch
+            if plot_first_samples == True:
+                save_images(list_low_res, output, channel, target, output_dir=output_dir_images)
+                plot_first_samples = False
 
-        # Keep track of the best/worst sample
-        # If the list is already filled
-        else:
-            # If the loss is higher than the min of the 5 highest, we should replace the sample
-            if test_loss > min_loss_of_the_worst:
-                worst_loss[0] = test_loss
-                worst_sample[0] = [list_low_res, output, channel, target]
-                # Sort both list again & compute the new min of the highest
+            # Update if it is a good/bad sample
+            # Fill the list with the first 5 values
+            if len(worst_loss) < best_worst_to_plot:
+                # Worst loss
+                for idx in range(best_worst_to_plot - len(worst_loss)): # Fill it until it reaches the right length
+                    worst_loss.append(loss_vector[idx].item()) # add the marginal loss
+                    worst_sample.append([get_sample(list_low_res, idx), output[idx], channel[idx], target[idx]]) # add the corresponding sample
+
                 worst_loss, worst_sample = sort_l1_l2(worst_loss, worst_sample) # Both list are sorted ascendingly 
 
                 min_loss_of_the_worst = worst_loss[0]
 
-            # Same for the best loss
-            if test_loss < max_loss_of_the_best:
-                best_loss[-1] = test_loss
-                best_sample[-1] = [list_low_res, output, channel, target]
-                # Sort both list again & compute the new max of the lowest
+            if len(best_loss) < best_worst_to_plot:
+                # Best loss
+                for idx in range(best_worst_to_plot - len(best_loss)): # Fill it until it reaches the right length
+                    best_loss.append(loss_vector[idx].item()) # add the marginal loss
+                    best_sample.append([get_sample(list_low_res, idx), output[idx], channel[idx], target[idx]]) # add the corresponding sample
+
                 best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
 
                 max_loss_of_the_best = best_loss[-1]
-        
 
-# Plot the best & worst sample
-def get_column(worst_sample, col):
-    return [x[col] for x in worst_sample]
 
-save_images(get_column(worst_sample, 0), get_column(worst_sample, 1), get_column(worst_sample, 2), get_column(worst_sample, 3), bot_or_top="bot")
-save_images(get_column(best_sample, 0), get_column(best_sample, 1), get_column(best_sample, 2), get_column(best_sample, 3), bot_or_top="top")
 
-avg_test_loss = total_test_loss / len(test_loader)
-print(f"Test Loss: {avg_test_loss:.4f}")
+            # Keep track of the best/worst sample
+            # If the list is already filled
+            else:
+                # If the loss is higher than the min of the 5 highest, we should replace the sample
+                for k in range(len(loss_vector)):
+                    marginal_loss = loss_vector[k].item()
+                    if marginal_loss > min_loss_of_the_worst:
+                        worst_loss[0] = marginal_loss
+                        worst_sample[0] = [get_sample(list_low_res, k), output[k], channel[k], target[k]]
+                        # Sort both list again & compute the new min of the highest
+                        worst_loss, worst_sample = sort_l1_l2(worst_loss, worst_sample) # Both list are sorted ascendingly 
+
+                        min_loss_of_the_worst = worst_loss[0]
+
+                    if marginal_loss < max_loss_of_the_best:
+                        best_loss[-1] = marginal_loss
+                        best_sample[-1] = [get_sample(list_low_res, k), output[k], channel[k], target[k]]
+                        # Sort both list again & compute the new min of the highest
+                        best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
+
+                        max_loss_of_the_best = best_loss[-1]
+
+
+            
+
+    # Plot the best & worst sample
+    def get_column(worst_sample, col):
+        return [x[col] for x in worst_sample]
+
+    save_images(get_column(worst_sample, 0), get_column(worst_sample, 1), get_column(worst_sample, 2), get_column(worst_sample, 3),
+                 bot_or_top="bot", output_dir=output_dir_images, best_worst=True)
+    save_images(get_column(best_sample, 0), get_column(best_sample, 1), get_column(best_sample, 2), get_column(best_sample, 3), 
+                bot_or_top="top", output_dir=output_dir_images, best_worst=True)
+
+    avg_test_loss = total_test_loss / len(test_loader)
+    print(f"Test Loss: {avg_test_loss}")
 
 

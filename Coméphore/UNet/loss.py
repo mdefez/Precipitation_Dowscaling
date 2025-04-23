@@ -2,11 +2,19 @@
 
 import torch 
 import torch.nn as nn
+from functools import partial
+import copy
 
 class CustomLoss(nn.Module):
     def __init__(self, base_loss, conservative = False, lambda_conservative = 0.1, lambda_covariance = 0.1, covariance = False):
         super().__init__()
-        self.base_loss = base_loss
+
+        self.loss_mean = copy.deepcopy(base_loss)
+        self.loss_none = copy.deepcopy(base_loss)
+
+        # On force les modes de réduction
+        self.loss_mean.reduction = 'mean'
+        self.loss_none.reduction = 'none'
 
         self.lambda_conservative = lambda_conservative
         self.lambda_covariance = lambda_covariance
@@ -28,7 +36,7 @@ class CustomLoss(nn.Module):
         return autocorr  # [B, H, W, 6, 6]
 
     def forward(self, outputs, targets):
-        loss = self.base_loss(outputs, targets)
+        loss = self.loss_mean(outputs, targets) 
 
         if self.conservative == True:
             # Conservative term
@@ -47,6 +55,31 @@ class CustomLoss(nn.Module):
             # Frobenius norm of difference
             frob_diff = torch.norm(ac_out - ac_tar, dim=(-2, -1))  # [B, H, W]
             frob_loss = frob_diff.mean()  # Mean over the batch & pixels
+
+            loss += self.lambda_covariance * frob_loss
+
+        return loss 
+    
+    def forward_vecteur(self, outputs, targets): # Compute the loss as a vector and note an average
+        loss = self.loss_none(outputs, targets).mean(dim = (1, 2, 3)) 
+
+        if self.conservative == True:
+            # Conservative term
+            sum_outputs = outputs.sum(dim=(1, 2, 3))  # Sum over the channels + whole frames
+            sum_targets = targets.sum(dim=(1, 2, 3))  # Same for target
+
+            conservative_term = torch.abs(sum_outputs - sum_targets).mean()  # Compute the difference and average over the whole batch
+
+            loss += self.lambda_conservative * conservative_term
+
+        if self.covariance == True:
+            # Autocorrelative term
+            ac_out = self.compute_autocorr_matrix(outputs)  # [B, H, W, 6, 6]
+            ac_tar = self.compute_autocorr_matrix(targets)  # [B, H, W, 6, 6]
+
+            # Frobenius norm of difference
+            frob_diff = torch.norm(ac_out - ac_tar, dim=(-2, -1))  # [B, H, W]
+            frob_loss = frob_diff.mean(dim = (1, 2))  # Mean over the pixels only
 
             loss += self.lambda_covariance * frob_loss
 

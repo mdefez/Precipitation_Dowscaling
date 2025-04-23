@@ -13,6 +13,7 @@ import torch.nn.functional as F
 
 class RainSuperResDataset(Dataset):
     def __init__(self, input_root, output_root, channel_root, hor, vert, temp_factor, spatial_factor, train=True, n_days = 5, n_inputs = 1): # Channel refers to the DEM
+        
         self.samples = [] # This is a list of all the inputs
 
         self.temp_factor = temp_factor

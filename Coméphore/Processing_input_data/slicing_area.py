@@ -137,8 +137,7 @@ def save_input_data(output_folder, year, spatial_factor, temp_factor): # Usually
                                  area = "RNB")
 
 
-save_input_data(f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data",
-                 "2023", spatial_factor=10, temp_factor=1)
+# save_input_data(f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data", "2023", spatial_factor=10, temp_factor=1)
 
 # Save the DEM data tile by tile in the same folder as the coarse inpur data
 def save_dem(output_folder): 

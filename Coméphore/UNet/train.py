@@ -18,7 +18,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Train the model a,d returns the average loss & the weights
 def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
           temp_factor, spatial_factor, loss_function = nn.L1Loss(), 
-          testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
+          testing = True, saving = False, save_dir = None, split = None, name_run = "run", treshold_constraint = 1):
 
     assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
     assert testing == False or isinstance(test_dataset, Dataset), "Can't test, test dataset not a torch dataset"
@@ -73,7 +73,10 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             for k in range(len(list_low_res)):
                 list_low_res[k] = list_low_res[k].to(device)
             
-            output = model(list_low_res, channel)     # Compute the output
+            if treshold_constraint >= epoch: # After some epochs, we apply conservative transformation to fine tune the model
+                apply_constraint = True
+
+            output = model(list_low_res, channel, apply_constraint = apply_constraint)     # Compute the output
             loss = criterion(output, target)        # Compute the loss
 
             optimizer.zero_grad()                   # Set the gradients to 0
@@ -93,7 +96,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         avg_loss = total_loss / len(train_loader) # Compute the aberage loss over the epoch
 
         wandb.log({f"Loss split {split}": avg_loss}) # Plot the loss on the website
-        print(f"Epoch {epoch}/{epochs} - Loss: {avg_loss:.4f}")
+        print(f"Epoch {epoch}/{epochs} - Loss: {avg_loss}")
 
     loss_to_return = avg_loss # If one is only training, the function returns the training loss
 
@@ -122,7 +125,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 total_test_loss += test_loss.item()
 
         avg_test_loss = total_test_loss / len(test_loader)
-        print(f"Test Loss after Epoch {epoch}: {avg_test_loss:.4f}")
+        print(f"Test Loss after Epoch {epoch}: {avg_test_loss}")
         loss_to_return = avg_test_loss
 
     # Save the weights if asked

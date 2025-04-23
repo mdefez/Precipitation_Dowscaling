@@ -189,7 +189,7 @@ class UNet_with_attention(nn.Module):
         return out
     
 
-    def forward(self, frames, dem): # frames is a list of coarse inputs, dem is the dem associated to the tile
+    def forward(self, frames, dem, apply_constraint = True): # frames is a list of coarse inputs, dem is the dem associated to the tile
 
         # frames = [frame_0, ..., frame_-1] where frame = (B, 1, 1, H, W) & dem = (B, 1, 100, 100)
 
@@ -211,8 +211,8 @@ class UNet_with_attention(nn.Module):
         if non_null_mask.any():
             # We only pass the non zero samples
             ### ATTENTION ENLEVER LES SQUEEZE(0) POUR LE TRAIN
-            frames_non_null = [frame[non_null_mask].squeeze(0) for frame in frames] # List of non null frame, now frame = (B', 1, 1, H, W) where B' is the number of non null samples
-            dem_non_null = dem[non_null_mask].squeeze(0)
+            frames_non_null = [frame[non_null_mask] for frame in frames] # List of non null frame, now frame = (B', 1, 1, H, W) where B' is the number of non null samples
+            dem_non_null = dem[non_null_mask]
 
             # Upsample the 2 frames with bicubic interpolation
             B, T, C, H, W = frames_non_null[0].shape
@@ -235,29 +235,41 @@ class UNet_with_attention(nn.Module):
             ### THIRD STEP
             # Here we apply (if asked) the hard constraint mass strategy
             # The constraint is such that the mass should be the same in the last aggregated frame and the predictions
-            if self.hard_constraint_mass != None:
-                if self.hard_constraint_mass == "additive":
-                    pass 
+            if apply_constraint == True:
 
-                else: # This is thus the multiplicative strategy
-                    strategy, f = self.hard_constraint_mass
+                if self.hard_constraint_mass != None:
+                    if self.hard_constraint_mass == "additive":
+                        # Choose the mass reference. It should be low res (time & space). Here we take the last input 
+                        P_LR = frames_non_null[-1].sum(dim=(-2, -1), keepdim = True) * self.temp_factor  # Shape (B', 1, 1, 1, 1)
+                        P_LR = P_LR.squeeze(4) # Shape (B', 1, 1, 1)
 
-                    f_output = f(output_non_null)  # shape: (B', temp_factor, 100, 100)
-
-                    # Choose the mass reference. It should be low res (time & space) 
-                    P_LR = frames_non_null[-1].sum(dim=(-2, -1), keepdim = True) * self.temp_factor   # Shape (B', 1, 1, 1, 1)
-                    P_LR = P_LR.squeeze(4) # Shape (B', 1, 1, 1)
-
-                    # Compute the sum at the denominator
-                    sum_f = f_output.sum(dim=(1, 2, 3), keepdim=True) / (self.spatial_factor ** 2)  # shape: (B', 1, 1, 1)
+                        # Compute the sum at the denominator
+                        sum = output_non_null.sum(dim=(1, 2, 3), keepdim=True) / (self.spatial_factor ** 2)  # shape: (B', 1, 1, 1)
 
 
-                    # Compute the final (constrained) outputs
-                    output_final = f_output * (P_LR / sum_f)   # shape: (B', 6, 100, 100)
-                    output_non_null = output_final                      # Rename it
+                        # Compute the final (constrained) outputs
+                        output_final = output_non_null + (P_LR - sum) * ((self.spatial_factor / 100)**2) / self.temp_factor  # shape: (B', 6, 100, 100)
+                        output_non_null = output_final                      # Rename it
 
-            # Setting the outputs
-            outputs[non_null_mask.squeeze()] = output_non_null  # [B, 6, H, W]
+                    else: # This is thus the multiplicative strategy
+                        strategy, f = self.hard_constraint_mass
+
+                        f_output = f(output_non_null)  # shape: (B', temp_factor, 100, 100)
+
+                        # Choose the mass reference. It should be low res (time & space) 
+                        P_LR = frames_non_null[-1].sum(dim=(-2, -1), keepdim = True) * self.temp_factor   # Shape (B', 1, 1, 1, 1)
+                        P_LR = P_LR.squeeze(4) # Shape (B', 1, 1, 1)
+
+                        # Compute the sum at the denominator
+                        sum_f = f_output.sum(dim=(1, 2, 3), keepdim=True) / (self.spatial_factor ** 2)  # shape: (B', 1, 1, 1)
+
+
+                        # Compute the final (constrained) outputs
+                        output_final = f_output * (P_LR / sum_f)   # shape: (B', 6, 100, 100)
+                        output_non_null = output_final                      # Rename it
+
+                # Setting the outputs
+                outputs[non_null_mask.squeeze()] = output_non_null  # [B, 6, H, W]
 
 
         else: # If all the batch is all zero (it might happened when the batch_size is low), we have to force the tensor to allow gradient computing
