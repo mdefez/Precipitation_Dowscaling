@@ -1,7 +1,0 @@
-2025-04-11 17:54:25,975 INFO    MainThread:1239756 [wandb_init.py:setup_run_log_directory():662] Logging user logs to /work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/wandb/run-20250411_175425-wdmosuwu/logs/debug.log
-2025-04-11 17:54:25,975 INFO    MainThread:1239756 [wandb_init.py:setup_run_log_directory():663] Logging internal logs to /work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/wandb/run-20250411_175425-wdmosuwu/logs/debug-internal.log
-2025-04-11 17:54:25,975 INFO    MainThread:1239756 [wandb_init.py:init():781] calling init triggers
-2025-04-11 17:54:25,976 INFO    MainThread:1239756 [wandb_init.py:init():786] wandb.init called with sweep_config: {}
-config: {'_wandb': {}}
-2025-04-11 17:54:25,976 INFO    MainThread:1239756 [wandb_init.py:init():801] wandb.init() called while a run is active
-2025-04-11 18:00:53,795 INFO    MsgRouterThr:1239756 [mailbox.py:close():129] [no run ID] Closing mailbox, abandoning 1 handles.
