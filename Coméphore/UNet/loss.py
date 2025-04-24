@@ -2,10 +2,10 @@
 
 import torch 
 import torch.nn as nn
-from functools import partial
+import numpy as np
 import copy
 
-class CustomLoss(nn.Module):
+class CustomLossTrain(nn.Module):
     def __init__(self, base_loss, conservative = False, lambda_conservative = 0.1, lambda_covariance = 0.1, covariance = False):
         super().__init__()
 
@@ -60,27 +60,26 @@ class CustomLoss(nn.Module):
 
         return loss 
     
-    def forward_vecteur(self, outputs, targets): # Compute the loss as a vector and note an average
-        loss = self.loss_none(outputs, targets).mean(dim = (1, 2, 3)) 
 
-        if self.conservative == True:
-            # Conservative term
-            sum_outputs = outputs.sum(dim=(1, 2, 3))  # Sum over the channels + whole frames
-            sum_targets = targets.sum(dim=(1, 2, 3))  # Same for target
+class LossTest(nn.Module):          # We us this loss function as a metric on the training set. It allows to compute averaged and marginal loss over the batch
+    def __init__(self, df_metric):
+        super().__init__()
+        self.name_metric = list(df_metric["Name"])
+        self.metric = [metric() for metric in df_metric["Metric"]]
 
-            conservative_term = torch.abs(sum_outputs - sum_targets).mean()  # Compute the difference and average over the whole batch
+        # Use the main metric to compute best/worst examples
+        self.loss_vector = copy.deepcopy(self.metric[0])
 
-            loss += self.lambda_conservative * conservative_term
+        # We specifiy reduction = None to compute the loss as a vector
+        self.loss_vector.reduction = 'none'
 
-        if self.covariance == True:
-            # Autocorrelative term
-            ac_out = self.compute_autocorr_matrix(outputs)  # [B, H, W, 6, 6]
-            ac_tar = self.compute_autocorr_matrix(targets)  # [B, H, W, 6, 6]
+    def forward(self, outputs, targets): # Usual (averaged) loss for each metric
+        loss = np.array([metric(outputs, targets).item() for metric in self.metric])
 
-            # Frobenius norm of difference
-            frob_diff = torch.norm(ac_out - ac_tar, dim=(-2, -1))  # [B, H, W]
-            frob_loss = frob_diff.mean(dim = (1, 2))  # Mean over the pixels only
+        return loss
 
-            loss += self.lambda_covariance * frob_loss
+
+    def forward_vecteur(self, outputs, targets): # Compute the loss as a vector (only for the main metric)
+        loss = self.loss_vector(outputs, targets).mean(dim = (1, 2, 3)) 
 
         return loss 

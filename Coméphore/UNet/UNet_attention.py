@@ -3,12 +3,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 
-class TemporalAttention(nn.Module):
+# Self attention : (B, T, C, H, W) to (B, T, C, H, W)
+class SelfTemporalAttention(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
         self.q_proj = nn.Linear(embed_dim, embed_dim)
@@ -45,27 +45,71 @@ class TemporalAttention(nn.Module):
 
         return out  # (B, T, C, H, W)
 
+# Cross attention (focus on the last frame) : (B, T, C, H, W) to (B, 1, C, H, W)
+class CrossTemporalAttention(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.embed_dim = embed_dim
+
+        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.v_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.out_proj = nn.Linear(self.embed_dim, embed_dim)
+        self.norm = nn.LayerNorm(self.embed_dim)
+
+    def forward(self, x):
+        # x: (B, T, C, H, W)
+        B, T, C, H, W = x.shape
+        assert T >= 2, "Need at least 2 frames for cross-attention"
+
+        # Last frame (query) — shape (B, 1, C, H, W)
+        x_q = x[:, -1:]
+        # All previous frames (key/value) — shape (B, T-1, C, H, W)
+        x_kv = x[:, :-1]
+
+        # Reshape to apply attention at each pixel location independently
+        q = x_q.permute(0, 3, 4, 1, 2).reshape(-1, 1, C)      # (B*H*W, 1, C)
+        kv = x_kv.permute(0, 3, 4, 1, 2).reshape(-1, T-1, C)  # (B*H*W, T-1, C)
+
+        # Project to Q, K, V
+        Q = self.q_proj(q)   # (BHW, 1, embed_dim)
+        K = self.k_proj(kv)  # (BHW, T-1, embed_dim)
+        V = self.v_proj(kv)  # (BHW, T-1, embed_dim)
+
+        # Scaled dot-product attention
+        attn_scores = (Q @ K.transpose(-2, -1)) / (self.embed_dim ** 0.5)  # (BHW, 1, T-1)
+        attn_weights = torch.softmax(attn_scores, dim=-1)                   # (BHW, 1, T-1)
+        out = attn_weights @ V                                              # (BHW, 1, embed_dim)
+
+        # Project back and residual + norm
+        out = self.out_proj(out)                  # (BHW, 1, C)
+        out = self.norm(out + q)                  # (BHW, 1, C)
+
+        # Reshape back to (B, 1, C, H, W)
+        out = out.view(B, H, W, 1, C).permute(0, 3, 4, 1, 2)
+
+        return out  # (B, 1, C, H, W)
+
 
 class UNet_with_attention(nn.Module):
-    def __init__(self,  hard_constraint_mass, temp_factor, spatial_factor, n_inputs, input_channels=2, base_channels=16):
+    def __init__(self, temp_factor, spatial_factor, model_parameters, input_channels=2, base_channels=16):
         super().__init__()
-        self.n_inputs = n_inputs
+        
         self.temp_factor = temp_factor 
         self.spatial_factor = spatial_factor 
-        self.hard_constraint_mass = hard_constraint_mass
+        self.hard_constraint_mass = model_parameters[0]
+        self.n_inputs = model_parameters[1]
+        self.attention = model_parameters[2]          # Attention strategy
 
         self.base_channels = base_channels
-        self.attn1 = TemporalAttention(base_channels)
-        self.attn2 = TemporalAttention(base_channels * 2)
-        self.attn3 = TemporalAttention(base_channels * 4)
-        self.attn4 = TemporalAttention(base_channels * 8)
-        self.attn_bottleneck = TemporalAttention(base_channels * 16)
+        self.attn1 = SelfTemporalAttention(base_channels)
+        self.attn2 = SelfTemporalAttention(base_channels * 2)
+        self.attn3 = SelfTemporalAttention(base_channels * 4)
+        self.attn4 = SelfTemporalAttention(base_channels * 8)
+        self.attn_bottleneck = CrossTemporalAttention(base_channels * 16)
 
-        self.attn_dec4 = TemporalAttention(base_channels * 16)
-        self.attn_dec3 = TemporalAttention(base_channels * 8)
-        self.attn_dec2 = TemporalAttention(base_channels * 4)
-        self.attn_dec1 = TemporalAttention(base_channels * 2)
 
+        # Encoder
         # Shared convolution applied per timestep
         self.encoder1 = self.conv_block(input_channels, base_channels)
         self.encoder2 = self.conv_block(base_channels, base_channels * 2)
@@ -74,26 +118,56 @@ class UNet_with_attention(nn.Module):
 
         self.pool = nn.MaxPool2d(2, 2)
 
+        # Bottleneck
         self.bottleneck = self.conv_block(base_channels * 8, base_channels * 16)
 
-        self.upconv4 = nn.ConvTranspose2d(base_channels * 16, base_channels * 8, 2, 2)
-        self.upconv3 = nn.ConvTranspose2d(base_channels * 16, base_channels * 4, 2, 2)
-        self.upconv2 = nn.ConvTranspose2d(base_channels * 8, base_channels * 2, 2, 2)
-        self.upconv1 = nn.ConvTranspose2d(base_channels * 4, base_channels, 2, 2)
+        # Decoder
+        # At each step, we upsampled, skip connection and add a conv block (double convolution)
 
-        self.final_layer =  nn.Sequential(nn.Conv2d(self.base_channels * 2, out_channels=self.temp_factor, kernel_size=1),
+        # We can use transposed convolution but it is known to generate artifacts in blocks
+        self.transconv4 = self.upconv(base_channels * 16, base_channels * 8, 2, 2)
+        self.transconv3 = self.upconv(base_channels * 8, base_channels * 4, 2, 2)
+        self.transconv2 = self.upconv(base_channels * 4, base_channels * 2, 2, 2)
+        self.transconv1 = self.upconv(base_channels * 2, base_channels, 2, 2)
+
+        # Or we can use upsampling
+        # To fill
+
+        # Or pixel shuffling
+        # To fill
+
+        # Conv blocks in the decoder
+        self.decoder4 = self.conv_block(base_channels * 16, base_channels * 8)
+        self.decoder3 = self.conv_block(base_channels * 8, base_channels * 4)
+        self.decoder2 = self.conv_block(base_channels * 4, base_channels * 2)
+        self.decoder1 = self.conv_block(base_channels * 2, base_channels)
+
+
+
+        # Store the layers to make the forward more readable (and iterate over it)
+        self.encoders = nn.ModuleList([self.encoder1, self.encoder2, self.encoder3, self.encoder4])
+        self.attention_blocks = nn.ModuleList([self.attn1, self.attn2, self.attn3, self.attn4])
+
+        self.upconvs  = nn.ModuleList([self.transconv4, self.transconv3, self.transconv2, self.transconv1])
+        self.decoders = nn.ModuleList([self.decoder4, self.decoder3, self.decoder2, self.decoder1])
+
+
+        # Final layer, 1*1 convolution
+        self.final_layer =  nn.Sequential(nn.Conv2d(self.base_channels, out_channels=self.temp_factor, kernel_size=1),
                                           nn.ReLU())
 
-    # To match size before concatenating
-    def pad_to_match(self, x, ref):
-        # Pad x spatially to match ref
-        _, _, _, H, W = ref.shape
-        _, _, _, h, w = x.shape
-        dh = H - h
-        dw = W - w
-        if dh > 0 or dw > 0:
-            x = F.pad(x, [0, dw, 0, dh])
-        return x
+    # To match x's size to target before concatenating
+    def pad_to_match(self, x, target):
+        diff_y = target.size(2) - x.size(2)
+        diff_x = target.size(3) - x.size(3)
+
+        pad_left = diff_x // 2
+        pad_right = diff_x - pad_left
+        pad_top = diff_y // 2
+        pad_bottom = diff_y - pad_top
+
+        x_padded = F.pad(x, (pad_left, pad_right, pad_top, pad_bottom), mode='replicate') # We can use either "replicate" or "reflect" 
+        return x_padded
 
 
     def conv_block(self, in_channels, out_channels):
@@ -105,86 +179,73 @@ class UNet_with_attention(nn.Module):
             nn.BatchNorm2d(out_channels)
         )
     
-    # To apply to each aggregated frame (so that we keep the frame aspect thus we are allowed to compute attention)
+    def upconv(self, in_channels, out_channels, stride=2, padding = 2):
+        return nn.ConvTranspose2d(in_channels, out_channels, stride, padding)
+    
+
+    def upsample(self, scale_factor=2):
+        return nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=False)
+        
+
+    # To apply to each aggregated frame (so that we keep the frame aspect thus we are allowed to compute temporal attention)
+    # One can also apply those functions to a sequence of one image (without computing attention)
     def apply_conv_per_t(self, x, conv):
+
         B, T, C, H, W = x.shape
         x = x.reshape(B * T, C, H, W)
         x = conv(x)
         _, C_out, H, W = x.shape
         x = x.view(B, T, C_out, H, W)
+
         return x
     
     def apply_pool_per_t(self, x):
+
         B, T, C, H, W = x.shape
         x = x.reshape(B * T, C, H, W)
         x = self.pool(x)
         C, H, W = x.shape[1:]
         x = x.view(B, T, C, H, W)
+
         return x
     
-    def upconv_per_t(self, x, upconv):
-        B, T, C, H, W = x.shape
-        x = x.reshape(B * T, C, H, W)
-        x = upconv(x)
-        C, H, W = x.shape[1:]
-        x = x.view(B, T, C, H, W)
-        return x
+
  
     def unet_forward(self, x): # Be careful, this is only the UNet block, the "real" forward is below
-        # x: (B, T, C=2, H, W), we have two channels, the low res precip and the dem
-        B, T, C, H, W = x.shape
+        # x: (B, T, C=2, H, W), we have two channels, the low res precip and the dem. T is the number of inputs
 
-        # Encoder
-        x1 = self.apply_conv_per_t(x, self.encoder1)     
-        #x1 = self.attn1(x1)
-        p1 = self.apply_pool_per_t(x1)
-
-        x2 = self.apply_conv_per_t(p1, self.encoder2)
-        #x2 = self.attn2(x2)
-        p2 = self.apply_pool_per_t(x2)
-
-        x3 = self.apply_conv_per_t(p2, self.encoder3)
-        #x3 = self.attn3(x3)
-        p3 = self.apply_pool_per_t(x3)
-
-        x4 = self.apply_conv_per_t(p3, self.encoder4)
-        #x4 = self.attn4(x4)
-        p4 = self.apply_pool_per_t(x4)
+        # ===== Encoder =====
+        encoder_outputs = []
+        x_in = x
+        for k in range(len(self.encoders)):
+            x_out = self.apply_conv_per_t(x_in, self.encoders[k])
+            encoder_outputs.append(x_out)
+            if self.attention == "encoder":                     # Compute attention depending on the strategy
+                x_out = self.attention_blocks[k](x_out)        # We compute attention after saving the soon-to-be skip connected
+            x_in = self.apply_pool_per_t(x_out)
 
         # Bottleneck
-        x5 = self.apply_conv_per_t(p4, self.bottleneck)
-        x5 = self.attn_bottleneck(x5)
+        x_bottleneck = self.apply_conv_per_t(x_in, self.bottleneck)
+        if self.attention in ["encoder", "bottleneck"]:
+            x_bottleneck = self.attn_bottleneck(x_bottleneck)
 
-        x1 = x1[:, -1].unsqueeze(1)
-        x2 = x2[:, -1].unsqueeze(1)
-        x3 = x3[:, -1].unsqueeze(1)
-        x4 = x4[:, -1].unsqueeze(1)
-        x5 = x5[:, -1].unsqueeze(1) # Take only the last frame to decode, (B, 1, C, H, W)
-        
+        # Keep only the low res frame to decode given that we don't compute attention in the decoder
+        # This goes from (B, T, C, H, W) to (B, C, H, W)
+        encoder_outputs = [f[:, -1] for f in encoder_outputs]
+        x_bottleneck = x_bottleneck[:, -1]
+
+
         # Decoder
-        d4 = self.upconv_per_t(x5, self.upconv4)
-        d4 = self.pad_to_match(d4, x4)
+        x = x_bottleneck
+        for i in range(len(self.upconvs)):
+            x = self.upconvs[i](x)
+            skip = encoder_outputs[-(i+1)]  
+            x = self.pad_to_match(x, skip)
+            x = torch.cat([x, skip], dim=1)
+            x = self.decoders[i](x)
 
-        d4 = torch.cat([d4, x4], dim=2) # We concatenate on the channel dimension, which is the second one
-        #d4 = self.attn_dec4(d4)
-
-        d3 = self.upconv_per_t(d4, self.upconv3)
-        d3 = self.pad_to_match(d3, x3)
-        d3 = torch.cat([d3, x3], dim=2)
-        #d3 = self.attn_dec3(d3)
-
-        d2 = self.upconv_per_t(d3, self.upconv2)
-        d2 = self.pad_to_match(d2, x2)
-        d2 = torch.cat([d2, x2], dim=2)
-        #d2 = self.attn_dec2(d2)
-
-        d1 = self.upconv_per_t(d2, self.upconv1)
-        d1 = self.pad_to_match(d1, x1)
-        d1 = torch.cat([d1, x1], dim=2)
-        #d1 = self.attn_dec1(d1)             # (B, T, C', H, W)
-
-        d1 = d1[:, -1]
-        out = self.final_layer(d1)  # (B, temp_factor, H, W)
+        # Final output
+        out = self.final_layer(x)
 
         return out
     

@@ -7,7 +7,6 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-from baseline import UNet
 from UNet_attention import UNet_with_attention
 import wandb
 
@@ -40,14 +39,10 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     print("Data loaded")
 
     # Define the model, loss function & optimizer
-    if asked_model == "UNet":
-        model = UNet(temp_factor=temp_factor, spatial_factor=spatial_factor, hard_constraint_mass=model_parameters[0]).to(device)
-    
-    elif asked_model == "UNet_with_attention":
+    if asked_model == "UNet_with_attention":
         model = UNet_with_attention(temp_factor=temp_factor, 
                                     spatial_factor=spatial_factor, 
-                                    hard_constraint_mass=model_parameters[0],
-                                    n_inputs=model_parameters[1]).to(device)
+                                    model_parameters=model_parameters).to(device)
 
     # Define the loss function & optimizer
     criterion = loss_function

@@ -1,13 +1,10 @@
 import torch
-from baseline import UNet
 from UNet_attention import UNet_with_attention
 from dataset import RainSuperResDataset
 from torch.utils.data import DataLoader
-import torch.nn as nn
 import os 
 import matplotlib.pyplot as plt
 from torch.utils.data import ConcatDataset
-from loss import CustomLoss
 import numpy as np
 import tools as tool
 
@@ -16,15 +13,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Function to plot a DEM/Precipitation image
 def plot_img(image, is_precip, nb_slot, position, title, nb_column = 2):
     plt.subplot(nb_slot, nb_column, position)
+    plt.subplots_adjust(hspace=0.4) 
 
     if is_precip:
         plt.imshow(image, cmap='viridis', vmin = 0, vmax = 0.1)
-        plt.colorbar(label = "Precipitation (mm)")
+        plt.colorbar(label = "Precipitation")
         plt.axis("off")
 
     else:
         plt.imshow(image, cmap='terrain', vmin = 0, vmax = 1)
-        plt.colorbar(label = "Elevation (m)")
+        plt.colorbar(label = "Elevation")
         plt.axis("off")
 
     plt.title(title)
@@ -92,19 +90,18 @@ def test(input_dir, output_dir, channel_dir,
          spatial_factor, temp_factor, n_inputs, name_of_the_run,
          best_transform, criterion, batch_size, asked_model, model_parameters, n_days):
     
-    output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/Images/{name_of_the_run}'
+    output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
 
     print("Loading model")
-    if asked_model == "UNet":
-        pass
+
+    if asked_model == "UNet_with_attention":
+        model = UNet_with_attention(model_parameters=model_parameters, temp_factor=temp_factor, spatial_factor=spatial_factor)  # Set the type of model we are using
     
-    elif asked_model == "UNet_with_attention":
-        strategy_mass = model_parameters[0]
+
 
     # Filepath to the .pth file, where are stored the model's weights
     filepath=f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/weights/{name_of_the_run}.pth' # Weights to load
 
-    model = UNet_with_attention(hard_constraint_mass=strategy_mass, temp_factor=temp_factor, spatial_factor=spatial_factor, n_inputs=n_inputs)  # Set the type of model we are using
     model = load_model(model, filepath)  # Load the weights
     model.to(device)
 
@@ -131,7 +128,6 @@ def test(input_dir, output_dir, channel_dir,
 
     # Evaluate
     model.eval()
-    total_test_loss = 0
 
     # To compute progress
     n = test_dataset.__len__()
@@ -184,10 +180,13 @@ def test(input_dir, output_dir, channel_dir,
 
             output = model(list_low_res, channel)     # Compute the output
 
-            test_loss = criterion(output, target).item() # Compute the average loss
+            test_loss = criterion(output, target) # Compute the average loss for each of the specified metric
             loss_vector = criterion.forward_vecteur(output, target) # Compute the marginal loss for each pair of output/target
 
-            total_test_loss += test_loss
+            try:    # If it exists, add the loss to the total loss
+                total_test_loss += test_loss
+            except: # If it doesn't exist, initialize it with the first loss
+                total_test_loss = test_loss 
 
             # Plot some random predictions for the first batch
             if plot_first_samples == True:
@@ -253,6 +252,6 @@ def test(input_dir, output_dir, channel_dir,
                 bot_or_top="top", output_dir=output_dir_images, best_worst=True)
 
     avg_test_loss = total_test_loss / len(test_loader)
-    print(f"Test Loss: {avg_test_loss}")
+    print(f"Test Loss: {avg_test_loss} for the following metrics \n{criterion.name_metric}")
 
 

@@ -9,7 +9,6 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-import torch.nn.functional as F
 
 class RainSuperResDataset(Dataset):
     def __init__(self, input_root, output_root, channel_root, hor, vert, temp_factor, spatial_factor, train=True, n_days = 5, n_inputs = 1): # Channel refers to the DEM
@@ -42,7 +41,7 @@ class RainSuperResDataset(Dataset):
             input_times = [int(f[10:20]) for f in input_files] # Get timesteps from the filename
             input_times.sort()
 
-            # We select n consecutive images if there is a 6 hour gap between each
+            # We select n consecutive low res frames
             for i in range(len(input_times) - (n_inputs - 1)): 
                 t0 = input_times[i]
                 following_frames = [t0]
@@ -50,7 +49,7 @@ class RainSuperResDataset(Dataset):
                 for k in range(1, n_inputs): # We loop until n - 1 to have exaclty n inputs
                     t_next = input_times[i + k]
                     following_frames.append(t_next)
-                    if t_next % 10 == 1 and self.temp_factor == 6: # Samples that starts at 1AM are corrupted
+                    if (t_next % 10 == 1 and self.temp_factor == 6) or ((t_next%100) + self.temp_factor >= 24): # Some exceptions should be handled + we should not overlap on the next day
                         add_the_sample = False
                 
                 
