@@ -1,6 +1,6 @@
 # This scripts implements (untrainable) baselines such as kNN & bicubic interpolation
 # Given the nature of the super-resolving methods, the latter can only perform it in space and not in time
-# Thus, if the temporal factor is greater than oone, all the sub images will be the same
+# Thus, if the temporal factor is greater than one, all the sub images will be the same
 
 import torch
 import torch.nn as nn

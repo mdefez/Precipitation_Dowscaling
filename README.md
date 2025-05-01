@@ -6,12 +6,12 @@ We work with two different datasets, covering different but not exclusive areas,
 
 Both datasets will be used as input & target :
 - The target will be the data as itself
-- The input will be the spatially & temporally downsampled data (by two adjustable factors). It is also possible to spatially blur the data through different filters
+- The input will be the spatially & temporally downsampled data (by two adjustable factors). 
 
-None of the data is stored in this repository, please specify the data path in the corresponding lines.
+None of the data is stored in this repository, please specify the data path in the corresponding lines. The Coméphore dataset is in open access on Data.gouv.fr
 
-This repository includes two main folders, one for each dataset. Please keep in mind the preprocessing is mostly done on Coméphore, thus the CPC folder might not be up to date. 
+This repository includes three main folders, one for each dataset and the last one stores the topography of both areas. For the moment most of the work is done on Coméphore, the CPC folder might not be up to date.
 
-Each folder includes a "Simple baseline" for each target dataset, where are implemented two shallow models (bicubic interpolation & kNN). To run those models, compute different metrics and plot relevant figures, one can run the "main.py". <br>
-Relevant results are stored in the folder Images, where each subfolder correspond to a timestamp. <br>
+
+The UNet folder stores many python files but one should run the CV.py and change the features inside of it to run different models (baselines, UNet with/without attention) with different parameters <br>
 
