@@ -7,7 +7,8 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-from UNet_attention import UNet_with_attention
+from UNet_attention import UNet_with_attention 
+from baseline import nearest_neighbor, bicubic
 import wandb
 
 
@@ -30,19 +31,23 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     wandb.init(project='test', entity='mdefez-cv', name = name_run) 
 
     # Load the dataset
-    print("Data loading")
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
     try: # One can set no test dataset
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
     except:
         test_loader = None
-    print("Data loaded")
 
     # Define the model, loss function & optimizer
     if asked_model == "UNet_with_attention":
         model = UNet_with_attention(temp_factor=temp_factor, 
                                     spatial_factor=spatial_factor, 
                                     model_parameters=model_parameters).to(device)
+        
+    elif asked_model == "bicubic":
+        model = bicubic(temp_factor=temp_factor, spatial_factor=spatial_factor).to(device)
+
+    elif asked_model == "nearest_neighbor":
+        model = nearest_neighbor(temp_factor=temp_factor, spatial_factor=spatial_factor).to(device)
 
     # Define the loss function & optimizer
     criterion = loss_function
@@ -60,7 +65,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         progress = 0 
         n = train_dataset.__len__()
         
-        for list_low_res, channel, target in train_loader:
+        for list_low_res, channel, target, time_idx in train_loader:
             print(f"Training progress : {100*progress/n:.2f}%")
             progress += batch_size
 
@@ -98,7 +103,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     # Test the model on the testing dataset if asked
     if testing == True:
         # Evaluate the model on the testing dataset
-        print("Testing")
+        print("Validating")
         model.eval()
         total_test_loss = 0
 
@@ -106,8 +111,8 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         p = 0 
         n = test_dataset.__len__()
         with torch.no_grad():
-            for list_low_res, channel, target in test_loader:
-                print(f"Testing progress : {100*p/n:.2f}%")
+            for list_low_res, channel, target, time_idx in test_loader:
+                print(f"Validating progress : {100*p/n:.2f}%")
                 p += batch_size 
 
                 channel, target = channel.to(device), target.to(device)
@@ -120,7 +125,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 total_test_loss += test_loss.item()
 
         avg_test_loss = total_test_loss / len(test_loader)
-        print(f"Test Loss after Epoch {epoch}: {avg_test_loss}")
+        print(f"Validating Loss after Epoch {epoch}: {avg_test_loss}")
         loss_to_return = avg_test_loss
 
     # Save the weights if asked

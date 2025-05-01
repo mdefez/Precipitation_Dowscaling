@@ -11,12 +11,14 @@ import torch
 from torch.utils.data import Dataset
 
 class RainSuperResDataset(Dataset):
-    def __init__(self, input_root, output_root, channel_root, hor, vert, temp_factor, spatial_factor, train=True, n_days = 5, n_inputs = 1): # Channel refers to the DEM
+    def __init__(self, input_root, output_root, channel_root, hor, vert, temp_factor, spatial_factor, train=True, n_days = 5, n_inputs = 1, delta = False): # Channel refers to the DEM
         
         self.samples = [] # This is a list of all the inputs
 
         self.temp_factor = temp_factor
         self.spatial_factor = spatial_factor
+
+        self.delta = delta # If we want to predict the delta instead of the real frames (except for the first one)
 
         # Folder where the data is stored
         self.input_root = input_root
@@ -49,7 +51,9 @@ class RainSuperResDataset(Dataset):
                 for k in range(1, n_inputs): # We loop until n - 1 to have exaclty n inputs
                     t_next = input_times[i + k]
                     following_frames.append(t_next)
-                    if (t_next % 10 == 1 and self.temp_factor == 6) or ((t_next%100) + self.temp_factor >= 24): # Some exceptions should be handled + we should not overlap on the next day
+
+                for t in following_frames:  # Some exceptions should be handled + we should not overlap on the next day
+                    if (t % 10 == 1 and self.temp_factor == 6) or ((t%100) + self.temp_factor >= 24):
                         add_the_sample = False
                 
                 
@@ -93,12 +97,27 @@ class RainSuperResDataset(Dataset):
         # Load the high res targets
         targets = []
 
-        # We have to select the 6 targets corresponding to the last low res frame
+        # We have to select the n targets corresponding to the last low res frame
+        count = 0
         for t in range(low_res_idx[-1], low_res_idx[-1] + self.temp_factor):  
             target_path = os.path.join(self.output_root, year, domain, self.target_format(t))
-            target = np.load(target_path)
+
+            if self.delta == True:                          # The first target should be the real frame, the following should be deltas
+                if count == 0:                              # First frame
+                    target = np.load(target_path)
+                    target_ref = target.copy()
+
+                if count >= 1:                              # Following frames
+                    target = np.load(target_path)
+                    target = target - target_ref            # t_n - t_0
+
+            else:                                           # If delta == False, simply add the real frames
+                target = np.load(target_path)
+
             targets.append(torch.tensor(target).unsqueeze(0).float())
+            count += 1
+            
         targets = torch.stack(targets) 
         targets = targets.squeeze(1) # (temp_factor, H, W)
 
-        return low_res_tensors, channel, targets
+        return low_res_tensors, channel, targets, low_res_idx # (List of inputs, dem, Tensor of targets, List of timesteps corresponding to targets)

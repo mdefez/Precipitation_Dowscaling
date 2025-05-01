@@ -83,3 +83,32 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
         loss = self.loss_vector(outputs, targets).mean(dim = (1, 2, 3)) 
 
         return loss 
+    
+
+# Computes the absolute difference between the 99th percentiles of output and target for each image/channel, and averages channels (and eventually batch depending on the reduction)
+class PercentileDifferenceLoss(nn.Module):
+    def __init__(self, percentile = 99, reduction = 'mean'):
+        super().__init__()
+
+        self.percentile = percentile
+        self.reduction = reduction
+
+    def forward(self, output, target):
+
+        B, C, H, W = output.shape
+
+        output_flat = output.view(B, C, -1)     # [B, C, H*W]
+        target_flat = target.view(B, C, -1)   # [B, C, H*W]
+
+        output_p = torch.quantile(output_flat, self.percentile / 100.0, dim=2)   # [B, C]
+        target_p = torch.quantile(target_flat, self.percentile / 100.0, dim=2) # [B, C]
+
+        diff = torch.abs(output_p - target_p)  # [B, C]
+        loss_per_image = diff.mean(dim=1)     # [B], mean over channels
+
+        if self.reduction == 'mean':
+            return loss_per_image.mean()      # scalar
+        else:  # 'none'
+            return loss_per_image             # [B]
+
+

@@ -1,7 +1,7 @@
 import slicing_area as slice 
 
-spatial_factor = 1
-temp_factor = 3
+spatial_factor = 10
+temp_factor = 1
 
 download_target = True # If we also want to download the target data
 

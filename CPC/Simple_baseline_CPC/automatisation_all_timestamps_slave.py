@@ -1,5 +1,3 @@
-import sys
-import pickle
 import xarray as xr
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
@@ -14,12 +12,15 @@ import pyproj
 import pandas as pd
 from scipy.stats import wasserstein_distance
 from scipy.stats import ks_2samp
+import proplot as pplt
+import matplotlib.colors as mcolors
 
 
 # Main function, run the entire pipeline (editing figures, making predictions and computing metrics)
 
 def main(cpc_file, ds):
     ref_fichier = cpc_file[:13]
+    print(ref_fichier)
     date = f" {cpc_file[6:8]} January 2019 {cpc_file[8:10]}H"
 
     chemin_image = os.path.join(os.getcwd(), "Simple_baseline_CPC/Images")
@@ -29,37 +30,12 @@ def main(cpc_file, ds):
     if not os.path.exists(fichier):
         os.makedirs(fichier)  
 
-    with PdfPages(f"Simple_baseline_CPC/Images/{ref_fichier}/figures.pdf") as pdf_fig:
+    with PdfPages(f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/CPC/Simple_baseline_CPC/Images/{ref_fichier}/figures.pdf") as pdf_fig:
 
         ########## Plotting ERA-5 ##########
 
         vmin = 0
-        vmax = 4
-
-        # Function to plot a map from a xarray
-        def plot_map(df_plot, nom):
-            # Create the figure with the geographical background
-            fig, ax = plt.subplots(figsize=(8, 8), subplot_kw={'projection': ccrs.PlateCarree()})
-
-            ax.coastlines()
-            ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
-            ax.add_feature(cfeature.LAND, edgecolor='black', facecolor='lightgray')
-
-            df_plot.plot(ax=ax, transform=ccrs.PlateCarree(), cmap='viridis', 
-                                cbar_kwargs={'label': "Precipitation during the passed hour (mm)"}, 
-                                vmin=vmin, vmax=vmax)
-
-            ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
-
-            titre = nom.split("/")[-1][:-4] + "\n" + date
-            ax.set_title(titre)
-
-            # Save the fig in the pdf
-            pdf_fig.savefig(dpi = 100)
-            plt.close()
-            
-
-        precip = ds.copy()
+        vmax = 2
 
         # Lat/lon of the lower_left / upper_right CPC_file
         lon_min_output = 3.168779677002355 
@@ -67,13 +43,106 @@ def main(cpc_file, ds):
         lon_max_output = 12.46232838782734 
         lat_max_output = 49.36326405028229
 
+        # Function to plot a map from a xarray
+        def plot_map(df_plot, nom):
+
+            # Création de la figure et axe avec projection géographique PlateCarree
+            fig, ax = pplt.subplots(proj='pcarree', figsize=(8, 8))
+
+            try:
+                lon = df_plot['longitude'].values
+                lat = df_plot['latitude'].values
+                data = df_plot.values
+
+            except:
+                lon = np.linspace(lon_min_output, lon_max_output, len(df_plot.columns.values))
+                lat = np.linspace(lat_max_output, lat_min_output, len(df_plot.index.values))
+                data = df_plot.fillna(0).values
+
+            # Ajout des éléments géographiques
+            ax.add_feature(cfeature.BORDERS, linestyle='-', edgecolor='black')
+
+            ax.set_xlim(lon_min_output, lon_max_output)  # Limiter la longitude
+            ax.set_ylim(lat_min_output, lat_max_output)  # Limiter la latitude
+
+            cmap1 = pplt.Colormap('Dusk')
+            cmap2 = pplt.Colormap('Reds1')
+
+            # Interpolation linéaire de chaque colormap sur un demi-espace
+            colors1 = cmap1(np.linspace(0, 0.4, 100))
+            colors2 = cmap2(np.linspace(0.2, 0.6, 150))
+
+            # Concaténer les deux
+            combined_colors = np.vstack([colors1, colors2])
+
+            # Créer une nouvelle colormap personnalisée
+            custom_cmap = pplt.Colormap(combined_colors)
+
+            mesh = ax.pcolormesh(
+                lon, lat, data,
+                cmap=custom_cmap,
+                vmin=vmin,
+                vmax=vmax,
+                colorbar='lr',  # place la colorbar à droite (l, r, t, b pour left, right, top, bottom)
+                colorbar_kw={'label': 'Precipitation (mm)'}
+            )
+
+            ax.format(
+                latlines=2,
+                lonlines=2,
+                grid=True,
+                gridminor=False,
+                labels = True,
+                ticklabelsize = 12,
+            )
+
+            ax.set_title(nom, fontsize = 16)
+
+            max_idx = np.unravel_index(np.argmax(data), data.shape)
+            max_y, max_x = max_idx  # attention à l'ordre : (row, column)
+            max_lat, max_lon = lat[max_y], lon[max_x]
+
+            # Ajouter une étoile rouge
+            ax.plot(max_lon, max_lat, marker='*', color='black', markersize=16, label = "Maximum value", linestyle = "None")
+            ax.legend(loc = "upper right")
+
+            valeur_max = data[max_y, max_x]
+
+            # Ajouter le texte à côté de l’étoile
+            ax.text(
+                max_lon + 0.2,  # petit décalage à droite
+                max_lat + 0.2, 
+                f"{valeur_max:.2f} mm",  # formatage à 2 décimales
+                color='black',
+                fontsize=13,
+                verticalalignment='center'
+            )
+
+
+
+            fig.text(0.5, 0.18, 'Longitude', ha='center', va='center', fontsize=16)
+            fig.text(0.02, 0.5, 'Latitude', ha='center', va='center', rotation='vertical', fontsize=16)
+
+
+            # Sauvegarde dans le PDF
+            fig.savefig(f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/CPC/Simple_baseline_CPC/Images/{ref_fichier}/{nom}.png", dpi=300,
+                        bbox_inches = "tight")
+            # pdf_fig.savefig()
+            # pplt.close(fig)
+
+            
+
+        precip = ds.copy()
+
+
+
         # Filtering the xarray data to the concerned area
         precip_suisse = precip.where(
             (precip['latitude'] >= lat_min_output) & (precip['latitude'] <= lat_max_output) &
             (precip['longitude'] >= lon_min_output) & (precip['longitude'] <= lon_max_output), drop=True
         )
 
-        plot_map(precip_suisse["tp"], f"Images/{ref_fichier}/Low resolution.png")
+        plot_map(precip_suisse["tp"], f"Low resolution (25km scale) precipitation over Switzerland \n the{date} from ERA-5")
 
 
         ########## Plotting bicubic interpolation ###################################################################
@@ -102,7 +171,7 @@ def main(cpc_file, ds):
 
         # Store & plot the data
         ds_interp = xr.DataArray(precipitation_fine, coords=[('latitude', new_latitudes), ('longitude', new_longitudes)])
-        plot_map(ds_interp, f"Images/{ref_fichier}/Bicubic interpolation.png")
+        plot_map(ds_interp, f"Bicubic interpolation (1km scale) precipitation over Switzerland \nthe{date}")
 
         # We invert the y axis because the (0, 0) value corresponds to the lower_left, we want it to match the CPC_file where
         # (0, 0) corresponds to the upper left
@@ -136,7 +205,7 @@ def main(cpc_file, ds):
 
         # Store & plot the data
         ds_knn = xr.DataArray(precipitation_fine, coords=[('latitude', new_latitudes), ('longitude', new_longitudes)])
-        plot_map(ds_knn, f"Images/{ref_fichier}/k-NearestNeighbors where k = {n_voisin}.png")
+        plot_map(ds_knn, f"k-NearestNeighbors (1km scale) precipitation over Switzerland \nthe{date}")
 
         # We invert the y axis because the (0, 0) value corresponds to the lower_left, we want it to match the CPC_file where
         # (0, 0) corresponds to the upper left
@@ -181,16 +250,18 @@ def main(cpc_file, ds):
 
             ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
-            ax.set_title("Ground Truth from CPC" + "\n" + date)
+            ax.set_title("High resolution Ground Truth from CPC" + "\n" + date)
 
-            pdf_fig.savefig()
+            pdf_fig.savefig(fig)
             plt.close()
+
+            plot_map(df, "High resolution (1 km) scale Ground Truth from CPC" + "\n" + date)
 
 
          
     ########## Metrics computing ###################################################################
 
-
+    print("STOP\nSTOP")
 
     # This function computes all the metrics and store them in a generated pdf file
     def métrique(pred_ini, target, nom):
@@ -217,7 +288,7 @@ def main(cpc_file, ds):
 
             img = ax.imshow(diff_matrix, extent=[lon_min_output, lon_max_output, lat_min_output, lat_max_output],
                             origin="upper", cmap="viridis", alpha=0.6) 
-
+            print("test")
             # Colorbar plot
             plt.colorbar(img, orientation="vertical", label="Difference of precipitation in mm")
             ax.set_xticks([])
@@ -309,17 +380,3 @@ def main(cpc_file, ds):
     # Run the function for both the sallow models
     métrique(ds_interp_iso, df, "Bicubic Interpolation")
     métrique(ds_knn_iso, df, "kNN")
-
-
-
-# This script is to be executed from another script with arguments as input
-
-name = sys.argv[1]  # Name of the cpc file
-pickle_file = sys.argv[2]  # path to the ERA-5 file (actually only line corresponding to the expected timestamp)
-
-# Extract the corresponding line
-with open(pickle_file, 'rb') as f:
-    ligne_extraite = pickle.load(f)
-
-# Run the main funciton
-main(name, ligne_extraite)

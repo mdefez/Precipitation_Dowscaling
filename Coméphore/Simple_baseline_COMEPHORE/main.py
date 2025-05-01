@@ -2,15 +2,13 @@
 # - Super-resolving in time & space
 # - Computing the metrics and eventually plot some samples
 
-import os 
 import sys
-import ipdb
 
 sys.path.append("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Simple_baseline_COMEPHORE")
 import functions as fun
 
-spatial_factor = 25
-temp_factor = 6
+spatial_factor = 10
+temp_factor = 1
 
 
 # If we want to work on the little dataset (02/2019)

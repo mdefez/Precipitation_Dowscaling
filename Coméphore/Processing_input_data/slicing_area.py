@@ -88,12 +88,12 @@ def get_dem(hor, vert):
     return dem
 
 # Compute the timestep we need to have the target (to train or test)
-def timestep_of_interest_target(year, n_days = 15):
+def timestep_of_interest_target(year, n_days = 28):
     list_files = []
     for month in range(1, 13):
         month = str(month).zfill(2)
 
-        for day in range(1, n_days + 1):
+        for day in range(15, n_days + 1):
             day = str(day).zfill(2)
 
             for hour in range(24):

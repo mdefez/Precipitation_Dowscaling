@@ -94,8 +94,8 @@ def get_transfo(strat, stats): # Useful in CV.py to save the transformation
 
     return transformation
 
-
-class TransformedDataset(Dataset): # Takes the datasets as input and returns the normalized datasets
+# Takes the datasets as input and returns the normalized datasets(dem, inputs & targets)
+class TransformedDataset(Dataset): 
     def __init__(self, base_dataset, transform_precip = None, transform_dem = None):
         self.base_dataset = base_dataset
         self.transform_precip = transform_precip
@@ -105,7 +105,7 @@ class TransformedDataset(Dataset): # Takes the datasets as input and returns the
         return len(self.base_dataset)
 
     def __getitem__(self, index):
-        low_res_tensors, channel, targets = self.base_dataset[index]
+        low_res_tensors, channel, targets, time_idx = self.base_dataset[index]
 
         # Normalize the DEM
         if self.transform_dem != None:
@@ -118,7 +118,7 @@ class TransformedDataset(Dataset): # Takes the datasets as input and returns the
             
             targets = self.transform_precip(targets)
 
-        return low_res_tensors, channel, targets
+        return low_res_tensors, channel, targets, time_idx
 
 
 ####################################################################################################################################################################################
@@ -126,8 +126,9 @@ class TransformedDataset(Dataset): # Takes the datasets as input and returns the
 ##################################################################################################################################################################################################################
 
 # Function that saves the model's weights in the file path
-def save_model(weights, name_of_the_run):
-    filepath = '/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/weights/'
+def save_model(weights, name_of_the_run, spatial_factor, temp_factor):
+    filepath = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/weights/spatial_{spatial_factor}_temp_{temp_factor}/'
+    os.makedirs(filepath, exist_ok=True)
     torch.save({'model_state_dict': weights}, filepath + name_of_the_run + ".pth")
 
 # Save some useful variables for computing the normalization on the test set

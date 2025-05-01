@@ -2,6 +2,7 @@ import subprocess
 import pickle
 import os 
 import xarray as xr
+from automatisation_all_timestamps_slave import main
 
 # Acquire ERA-5 dataset
 ds = xr.open_dataset("../../raw_data/ECMWF/ERA5/SL/total_precipitation/ERA5_2019-1_total_precipitation.nc", engine="netcdf4")
@@ -28,19 +29,12 @@ netcdf_file = 'df_temp.nc'
 
 # Loop to run the pipeline for one CPC_file
 for cpc, ligne_index in zip(tous_les_cpc, indices_ligne):
+    if cpc != "CPC1901306009_00060.801.h5":
+        continue
     print(cpc)
     # Extract the corresponding ERA data
     ligne = ds.isel(time = ligne_index)
 
-    # Save the corresponding line into a temporary file
-    pickle_file = f'ligne_{ligne_index}.pkl'
-    with open(pickle_file, 'wb') as f:
-        pickle.dump(ligne, f)
+    # Run the slave
+    main(cpc, ligne)
     
-    # Run the slave with the corresponding cpc_file & ERA line
-    result = subprocess.run(['python', 'Simple_baseline_CPC/automatisation_all_timestamps_slave.py', cpc, pickle_file], capture_output=True, text=True)
-    print(result.stdout)
-    print(result.stderr)
-
-    # Delete the temporary file
-    os.remove(pickle_file)
