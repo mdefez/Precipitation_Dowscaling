@@ -88,7 +88,7 @@ class RainSuperResDataset(Dataset):
         # Load the low res inputs
         low_res_frames = [np.load(os.path.join(self.input_root, year, domain, self.input_format(t))) for t in low_res_idx]
         # Transform into tensors
-        low_res_tensors = [torch.tensor(npy).unsqueeze(0).unsqueeze(0).float() for npy in low_res_frames] # List of (1, H, W)
+        low_res_tensors = [torch.tensor(npy).unsqueeze(0).unsqueeze(0).float() for npy in low_res_frames] # List of (1, 1, H, W)
 
         # Load the DEM
         channel = np.load(os.path.join(self.channel_root, self.dem_name(domain)))

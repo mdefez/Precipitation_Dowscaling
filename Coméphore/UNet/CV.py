@@ -14,6 +14,7 @@ from test import test
 import time
 import pandas as pd
 from loss import PercentileDifferenceLoss
+import os 
 
 start_time = time.time()
 
@@ -31,7 +32,7 @@ if torch.cuda.is_available():
 # Super resolution factors
 temp_factor = 1
 spatial_factor = 10
-n_inputs = 1        # Frames to take into account as input, the last one is the image to downscale
+n_inputs = 5        # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
 n_days_train = 28 # Only first n_days are used for each month
@@ -41,6 +42,11 @@ n_days_test = 15
 training = True 
 normalizing = False # If False, the code will import the last normalizer saved
 testing = True 
+
+# Training features
+batch_size = 128
+epochs = 25
+learning_rate = 5e-4
 
 # Data directories
 input_dir = f'/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/spatial_{spatial_factor}_temp_{temp_factor}'          # Low res frames
@@ -60,17 +66,14 @@ def f_mass(x): # Function to apply element by element to the tensor. Be careful,
 treshold_constraint = 15 # Epoch where we should begin to apply conservative transformation
 
 # Attention parameters
-list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]
-strat_attention = [None]
+list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
+strat_attention = ["time", "space"]
 
 # Choice of the model and parameters
 model = "UNet_with_attention" 
 model_parameters = (("multiplicative", f_mass), n_inputs, strat_attention)
 
-# Training features
-batch_size = 128
-epochs = 25
-learning_rate = 5e-4
+
 
 # Loss function (used for training
 base_loss = nn.L1Loss       # Fill with nn.L1Loss or nn.MSELoss
@@ -118,16 +121,16 @@ if model in ["bicubic", "nearest_neighbor"]: # If the model is not trainable
 ####################################################################################################################################################################################
 
 # Check for valid settings
-assert not (strat_attention != [None] and n_inputs == 1), "You want to compute attention with a 1-input sequence"
-assert not (strat_attention == [None] and n_inputs != 1), "You want multiple inpus without computing attention"
+assert not ("time" in strat_attention and n_inputs == 1), "You want to compute temporal attention with a 1-input sequence"
+assert not ("time" not in strat_attention and n_inputs != 1), "You want multiple inputs without computing temporal attention"
 assert epochs >= treshold_constraint, "The treshold for the mass conservation constraint is set after the number of epochs"
 assert model in available_model, "Model not part of available model"
-assert strat_attention in list_strat_attention, "Attention strategy not in the list of available attention strategies"
+assert strat_attention in list_strat_attention , "Attention strategies not in the list of available attention strategies"
 assert len(model_parameters) == len(required_model_parameters[model]), "Wrong number of model parameters filled"
 assert not (n_days_test == 1 or n_days_train == 1), "Training or Testing set is empty, don't set n_days to 1"
 assert not (training == True and model in ["nearest_neighbor", "bicubic"]), "You are trying to train an untrainable model"
 assert not (model in ["nearest_neighbor", "bicubic"] and n_inputs != 1), "You should not set n_inputs to more than 1 if you are using untrainable models"
-
+assert strat_dem in dict_strategies and strat_precip in dict_strategies, "You chose an unavailable scaling strategies"
 
 # CV pipeline 
 if training:

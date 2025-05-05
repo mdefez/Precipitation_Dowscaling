@@ -31,9 +31,9 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     wandb.init(project='test', entity='mdefez-cv', name = name_run) 
 
     # Load the dataset
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     try: # One can set no test dataset
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     except:
         test_loader = None
 
