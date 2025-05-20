@@ -2,6 +2,22 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
+class DiffusionScheduler:
+    def __init__(self, timesteps, beta_start=1e-4, beta_end=0.02):
+        self.timesteps = timesteps
+        self.betas = torch.linspace(beta_start, beta_end, timesteps)
+        self.alphas = 1.0 - self.betas
+        self.alpha_bars = torch.cumprod(self.alphas, dim=0)
+
+    def q_sample(self, x_start, t, noise=None):
+        if noise is None:
+            noise = torch.randn_like(x_start)
+
+        self.alpha_bars = self.alpha_bars.to(x_start.device)
+        sqrt_ab = self.alpha_bars[t].sqrt().view(-1, 1, 1, 1)
+        sqrt_one_minus_ab = (1 - self.alpha_bars[t]).sqrt().view(-1, 1, 1, 1)
+        return sqrt_ab * x_start + sqrt_one_minus_ab * noise
+
 # Ca sort un vecteur [B, T, 256], à investiguer
 class TemporalEncoder(nn.Module):
     def __init__(self, input_channels, embed_dim, seq_len):
@@ -149,6 +165,23 @@ def setup_input(device, scheduler, A_seq, C, B, temporal_encoder): # Set up inpu
     model_input = torch.cat([R_t, A_T, C], dim=1)     # (B, C_B + C_A + C_C = 2*temp_factor + 2, H, W)
 
     return model_input, temporal_embed, noise
+
+def setup_input_inference(device, R_t, A_seq, C, temporal_encoder): # Set up input/output for the diffusion model for the inference step
+    A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1, precip 
+    C = C.to(device)                    # (B, C_C, H, W) where C_C = temp_factor
+    R_t = R_t.to(device)                    # (B, C_B, H, W) where C_B = temp_factor
+
+
+    # encodeur temporel sur A pour extraire des features et coder l'aspect séquentiel
+    temporal_input = A_seq.clone()  # (B, T, C, H, W)
+    with torch.no_grad():
+        temporal_embed = temporal_encoder(temporal_input)  # (B, T, D)
+
+    # entrée du modèle : bruit R_t + dernière frames A_T et C_T
+    A_T = A_seq[:, -1]                                # (B, C, H, W)
+    model_input = torch.cat([R_t, A_T, C], dim=1)     # (B, C_B + C_A + C_C = 2*temp_factor + 2, H, W)
+
+    return model_input, temporal_embed
 
 
 def bicubic_A_seq(list_frames): # Bicubically interpolate the list of frame to pass in the diffusion UNet

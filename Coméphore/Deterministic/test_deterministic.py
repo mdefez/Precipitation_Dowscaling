@@ -114,7 +114,7 @@ def load_model(model, filepath):
 def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
          criterion, batch_size, asked_model, model_parameters, delta):
     
-    output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
+    output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
 
     print("Loading model")
 
@@ -128,7 +128,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
         model = nearest_neighbor(temp_factor=temp_factor, spatial_factor=spatial_factor).to(device)
 
     # Filepath to the .pth file, where are stored the model's weights
-    filepath=f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
+    filepath=f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
 
     if asked_model not in ["bicubic", "nearest_neighbor"]: # If the model is trainable, load the weights
         model = load_model(model, filepath)  # Load the weights
