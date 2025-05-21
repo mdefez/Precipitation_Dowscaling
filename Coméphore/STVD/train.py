@@ -6,6 +6,7 @@
 import torch
 import torch.optim as optim
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 import sys
 from tqdm import tqdm
@@ -61,7 +62,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
     # Define the diffusion model
     in_channels = 2*(temp_factor) + 1
-    model_diffusion = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256).to(device)
+    model_diffusion = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128).to(device)
 
     # Define the loss function & optimizer
     criterion = loss_function
@@ -75,7 +76,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         model_deter.train()
 
         temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_input).to(device).train()
-        scheduler_diff = DiffusionScheduler(timesteps=1000)
+        scheduler_diff = DiffusionScheduler(timesteps=100)
 
         total_loss = 0
 
@@ -99,26 +100,49 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
             A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
             # Pass the input as the right format for the diffusion model
-            model_input, temporal_embed, noise = setup_input(device = device, 
+            model_input, temporal_embed, t, noise = setup_input(device = device, 
                                           scheduler = scheduler_diff, 
                                           A_seq = A_seq, 
                                           C = output, 
                                           B = target, 
                                           temporal_encoder = temporal_encoder)
 
-            pred_noise = model_diffusion(model_input, temporal_embed)
-            loss = torch.nn.functional.mse_loss(pred_noise, noise)      # Compute the loss (MSE over the noise)
+            pred_noise = model_diffusion(model_input, temporal_embed, t)
+
+            loss = F.mse_loss(pred_noise, noise)      # Compute the loss (MSE over the noise)
 
             optimizer.zero_grad()                   # Set the gradients to 0                
             loss.backward()                         # Compute the gradients
             optimizer.step()                        # Update the weights
+
+
 
             total_loss += loss.item()
 
             if epoch_batch == "batch":
                 scheduler.step() # Tune the learning rate value
 
-        
+        def print_sample():
+            print("noised residual", model_input[0][0])
+            print("bicubic", model_input[0][1])
+            print("deter", model_input[0][2])
+            print("target", target[0])
+            print("low res", list_low_res[-1][0])
+            print(t[0])
+            print("true noise", noise[0][0])
+            print("predicted noise", pred_noise[0][0])
+
+        print_sample()
+
+
+        def print_grad():
+            for name, param in model_diffusion.named_parameters():
+                if param.grad is not None:
+                    print(f"{name}: grad norm = {param.grad.norm().item():.4f}")
+                else:
+                    print(f"{name}: NO grad")
+
+        print_grad()
 
         if epoch_batch == "epoch":
             scheduler.step() # Tune the learning rate value
@@ -163,5 +187,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         torch.save({'model_state_dict': model_deter.state_dict()}, save_dir)
 
     return model_deter.state_dict(), model_diffusion.state_dict(), loss_to_return
+
 
 

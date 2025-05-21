@@ -39,7 +39,7 @@ spatial_factor = 10
 n_inputs = 1        # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
-n_days_train = 2 # Only first n_days are used for each month
+n_days_train = 5 # Only first n_days are used for each month
 n_days_test = 2
 
 # Choose wether we want to train/test/both
@@ -51,7 +51,7 @@ cross_val = False # If we want to perform cross validation or simple training
 
 # Training features
 batch_size = 128
-epochs = 1
+epochs = 10
 learning_rate = 1e-5
 
 # Data directories
