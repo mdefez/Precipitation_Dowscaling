@@ -21,7 +21,7 @@ class DiffusionScheduler:
         return sqrt_ab * x_start + sqrt_one_minus_ab * noise
 
 
-# Ca sort un vecteur [B, T, 256]. Chaque image de la séquence (C, H, W) est convertie en un vecteur riche de taille 256
+# Pour coder chaque image de la séquence (C, H, W) en un vecteur riche de taille 256. Ca sort donc un vecteur [B, T, 256].
 class TemporalEncoder(nn.Module):
     def __init__(self, input_channels, embed_dim, seq_len):
         super().__init__()
@@ -41,6 +41,7 @@ class TemporalEncoder(nn.Module):
         return x.transpose(0, 1)  # (B, T, D)
     
 # --- Embedding sinusoidal du temps t --- pour que le UNet prenne en compte le step de diffusion
+# On code le step t en un vecteur de grande dimension dont les composantes sont des fonctions du step t (plus ou moins des fonctions trigos)
 class TimeEmbedding(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -54,6 +55,7 @@ class TimeEmbedding(nn.Module):
         emb = torch.exp(torch.arange(half_dim, device=device) * -emb)  # (half_dim,)
         emb = t[:, None].float() * emb[None, :]  # (B, half_dim)
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)  # (B, dim)
+
         return emb  # (B, dim)
 
 
@@ -127,21 +129,25 @@ class UNetforDiffusion(nn.Module):
     def __init__(self, in_channels, base_channels, embed_dim, time_emb_dim):
         super().__init__()
 
+        # Denoising step as a vector
         self.time_emb = TimeEmbedding(time_emb_dim)
 
+        # Encoder
         self.encoder1 = ConvBlock(in_channels, base_channels, time_emb_dim)
         self.encoder2 = ConvBlock(base_channels, base_channels * 2, time_emb_dim)
         self.encoder3 = ConvBlock(base_channels * 2, base_channels * 4, time_emb_dim)
         self.encoder4 = ConvBlock(base_channels * 4, base_channels * 8, time_emb_dim)       # Bottleneck
 
-        self.pool = nn.MaxPool2d(2)
-        self.attn_blocks = nn.ModuleList([
-            CrossAttentionBlock(embed_dim, base_channels),
-            CrossAttentionBlock(embed_dim, base_channels * 2),
-            CrossAttentionBlock(embed_dim, base_channels * 4),
-            CrossAttentionBlock(embed_dim, base_channels * 8),
-        ])
+        self.encoder = nn.ModuleList([self.encoder1, self.encoder2, self.encoder3, self.encoder4])
 
+        # Pooling
+        self.pool = nn.MaxPool2d(2)
+
+        # Temporal attention
+        self.attn_blocks = nn.ModuleList([CrossAttentionBlock(embed_dim, base_channels), CrossAttentionBlock(embed_dim, base_channels * 2),
+            CrossAttentionBlock(embed_dim, base_channels * 4), CrossAttentionBlock(embed_dim, base_channels * 8)])
+
+        # Decoder
         self.upconv3 = nn.ConvTranspose2d(base_channels * 8, base_channels * 4, 2, stride=2)
         self.decoder3 = ConvBlock(base_channels * 8, base_channels * 4, time_emb_dim)
         self.upconv2 = nn.ConvTranspose2d(base_channels * 4, base_channels * 2, 2, stride=2)
@@ -149,7 +155,11 @@ class UNetforDiffusion(nn.Module):
         self.upconv1 = nn.ConvTranspose2d(base_channels * 2, base_channels, 2, stride=2)
         self.decoder1 = ConvBlock(base_channels * 2, base_channels, time_emb_dim)
 
-        self.final = nn.Conv2d(base_channels, 1, 1)  # Predict 1-channel residual
+        self.decoder = nn.ModuleList([self.decoder1, self.decoder2, self.decoder3])
+        self.upconv = nn.ModuleList([self.upconv1, self.upconv2, self.upconv3])
+
+        # Final layer
+        self.final = nn.Conv2d(base_channels, 1, 1)  # Predict 1-channel residual (the noise)
 
     # To match x's size to target before concatenating
     def pad_to_match(self, x, target):
@@ -166,94 +176,36 @@ class UNetforDiffusion(nn.Module):
 
     def forward(self, x, temporal_embedding, t):
 
-        t_emb = self.time_emb(t)  # Code the step into a 128d vector, (B, time_emb_dim)
+        t_emb = self.time_emb(t)  # (B, time_emb_dim), denoising step
 
-        e1, skip1 = self.encoder1(x, t_emb)
-        #e1 = self.attn_blocks[0](e1, temporal_embedding)
-        e2 = self.pool(e1)
-        e2, skip2 = self.encoder2(e2, t_emb)
-        #e2 = self.attn_blocks[1](e2, temporal_embedding)
-        e3 = self.pool(e2)
-        e3, skip3 = self.encoder3(e3, t_emb)
-        #e3 = self.attn_blocks[2](e3, temporal_embedding)
+        # --- Encoder ---
+        skips = []
+        e = x
+        for i in range(len(self.encoder)):
+            e, skip = self.encoder[i](e, t_emb)
+            e = self.attn_blocks[i](e, temporal_embedding)  # Pay attention to the whole (embedded) sequence
+            if i < len(self.encoder) - 1:
+                skips.append(skip)
+                e = self.pool(e)
+            else:
+                # Last encoder (= bottleneck) has no skip connection to keep
+                skips.append(None)
 
-        e4 = self.pool(e3)
-        e4, _ = self.encoder4(e4, t_emb)
-        #e4 = self.attn_blocks[3](e4, temporal_embedding)
+        # --- Decoder ---
+        d = e
+        for i in reversed(range(len(self.decoder))):
+            d = self.upconv[i](d)
+            if skips[i] is not None:
+                d = self.pad_to_match(d, skips[i])
+                d = torch.cat([d, skips[i]], dim=1)
+            d, _ = self.decoder[i](d, t_emb)
 
-        d3 = self.upconv3(e4)
-        d3 = self.pad_to_match(d3, skip3)
-        d3 = torch.cat([d3, skip3], dim=1)
-        d3, _ = self.decoder3(d3, t_emb)
-        d2 = self.upconv2(d3)              
-        d2 = self.pad_to_match(d2, skip2)
-        d2 = torch.cat([d2, skip2], dim=1)
-        d2, _ = self.decoder2(d2, t_emb)
-        d1 = self.upconv1(d2)
-        d1 = self.pad_to_match(d1, skip1)
-        d1 = torch.cat([d1, skip1], dim=1)
-        d1, _ = self.decoder1(d1, t_emb)
-
-        output = self.final(d1)
+        output = self.final(d)
 
         return output
 
 
 
-def setup_input(device, scheduler, A_seq, C, B, temporal_encoder): # Set up input/output for the diffusion model.
-    A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1, precip 
-    C = C.to(device)                    # (B, C_C, H, W) where C_C = temp_factor
-    B = B.to(device)                    # (B, C_B, H, W) where C_B = temp_factor
-
-    R = B - C                           # résidu à apprendre, (B, C, H, W)
-
-    # échantillonner un timestep t pour chaque élément du batch
-    B_size = B.size(0)
-    t = torch.randint(0, scheduler.timesteps, (B_size,), device=device)     # Denoising step
-
-    noise = torch.randn_like(R)
-    R_t = scheduler.q_sample(R, t, noise=noise)
-
-    # encodeur temporel sur A pour extraire des features et coder l'aspect séquentiel
-    temporal_input = A_seq.clone()  # (B, T, C, H, W)
-    with torch.no_grad():
-        temporal_embed = temporal_encoder(temporal_input)  # (B, T, D)
-
-    # entrée du modèle : bruit R_t + dernière frames A_T et C (sortie du deterministic)
-    A_T = A_seq[:, -1]                                # (B, C, H, W)
-    model_input = torch.cat([R_t, A_T, C], dim=1)     # (B, C_B + C_A + C_C = 2*temp_factor + 2, H, W)
-
-    return model_input, temporal_embed, t, noise
-
-def setup_input_inference(device, R_t, A_seq, C, temporal_encoder): # Set up input/output for the diffusion model for the inference step
-    A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1, precip 
-    C = C.to(device)                    # (B, C_C, H, W) where C_C = temp_factor
-    R_t = R_t.to(device)                    # (B, C_B, H, W) where C_B = temp_factor
-
-
-    # encodeur temporel sur A pour extraire des features et coder l'aspect séquentiel
-    temporal_input = A_seq.clone()  # (B, T, C, H, W)
-    with torch.no_grad():
-        temporal_embed = temporal_encoder(temporal_input)  # (B, T, D)
-
-    # entrée du modèle : bruit R_t + dernière frames A_T et C_T
-    A_T = A_seq[:, -1]                                # (B, C, H, W)
-    model_input = torch.cat([R_t, A_T, C], dim=1)     # (B, C_B + C_A + C_C = 2*temp_factor + 2, H, W)
-
-    return model_input, temporal_embed
-
-
-def bicubic_A_seq(list_frames): # Bicubically interpolate the list of frame to pass in the diffusion UNet
-    B, T, C, H, W = list_frames[0].shape
-
-    # Change the shape to feed the interpolater
-    frames_up = [frame.view(B * T, C, H, W) for frame in list_frames] 
-    frames_up = [F.interpolate(frame, size=(100, 100), mode='bicubic', align_corners=False) for frame in frames_up] 
-    frames_up = [frame.view(B, T, C, 100, 100) for frame in frames_up]
-
-    frames_up = torch.cat(frames_up, dim = 1)
-
-    return frames_up
 
 
 

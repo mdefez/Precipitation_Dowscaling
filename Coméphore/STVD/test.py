@@ -6,7 +6,8 @@ sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Do
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
 
 from UNet_attention import UNet_with_attention
-from diffusion_model import UNetforDiffusion, setup_input, TemporalEncoder, bicubic_A_seq, DiffusionScheduler
+from diffusion_model import UNetforDiffusion, DiffusionScheduler, TemporalEncoder
+from tools_diffu import bicubic_A_seq
 from torch.utils.data import DataLoader
 import os 
 import matplotlib.pyplot as plt
@@ -19,7 +20,7 @@ from inference import sample_diffusion
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Function to plot a DEM/Precipitation image
-def plot_img(image, is_precip, nb_slot, position, title, delta = False, nb_column = 2):
+def plot_img(image, is_precip, nb_slot, position, title, delta = False, nb_column = 3):
     plt.subplot(nb_slot, nb_column, position)
     plt.subplots_adjust(hspace=0.4) 
     plt.subplots_adjust(wspace=0.5) 
@@ -56,16 +57,17 @@ def plot_img(image, is_precip, nb_slot, position, title, delta = False, nb_colum
     plt.title(title)
 
 # Function to plot all the relevant images and save them
-def save_images(list_input, time_idx, predictions, dem, targets, output_dir, delta, bot_or_top = None, best_worst = False):
+def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, targets, output_dir, delta, bot_or_top = None, best_worst = False):
 
     os.makedirs(output_dir, exist_ok=True)
     for folder in ["Random", "Lowest", "Best"]:
         os.makedirs(os.path.join(output_dir, folder), exist_ok=True)
     
     # We save n examples per epoch
-    for i in range(min(15, len(predictions))): 
+    for i in range(min(15, len(predictions_final))): 
 
-        pred_img = predictions[i].cpu().detach().numpy()               # Predictions
+        pred_img = predictions_final[i].cpu().detach().numpy()               # Final Predictions
+        pred_img_deter = prediction_deter[i].cpu().detach().numpy()               # Output (prediction) of the deterministic UNet
         target_img = targets[i].cpu().detach().numpy()                 # Targets
         if best_worst == False: # If we plot samples from a batch
             list_input_plot = [inp[i].cpu().detach().numpy().squeeze() for inp in list_input] # frames
@@ -79,9 +81,9 @@ def save_images(list_input, time_idx, predictions, dem, targets, output_dir, del
         num_channels = pred_img.shape[0]
 
         # Number of vertical slots
-        nb_slots = num_channels + 1 + len(list_input_plot) // 2          
+        nb_slots = num_channels + 1 + (len(list_input_plot))// 3     # DEM + input + temp_factor (given that we have 3 columns)      
 
-        plt.figure(figsize=(8, 5 * num_channels))
+        plt.figure(figsize=(12, 5 * num_channels))
 
         # Plot DEM & inputs
         plot_img(dem_plot, False, nb_slots, 1, "DEM")
@@ -95,16 +97,19 @@ def save_images(list_input, time_idx, predictions, dem, targets, output_dir, del
             if delta == True and c >= 1:    # To change the range of the colormap if we plot deltas
                 new_scale = True
 
-            # Prediction
-            plot_img(pred_img[c], True, nb_slots, 2*((len(list_input_plot))//2) + 2 + 2*c + 1, f"Prediction - Timestep {c+1}", delta=new_scale)
+            # Prediction of the deterministic model
+            plot_img(pred_img_deter[c], True, nb_slots, 3*((len(list_input_plot))//3) + 3*(c+1) + 1, f"Prediction (deterministic) - Timestep {c+1}", delta=new_scale)
+
+            # Final Prediction
+            plot_img(pred_img[c], True, nb_slots, 3*((len(list_input_plot))//3) + 3*(c+1) + 2, f"Final prediction - Timestep {c+1}", delta=new_scale)
 
             # Target
-            plot_img(target_img[c], True, nb_slots, 2*((len(list_input_plot))//2) + 2 + 2*c + 2, f"Target - Timestep {c+1}", delta=new_scale)
+            plot_img(target_img[c], True, nb_slots, 3*((len(list_input_plot))//3) + 3*(c+1) + 3, f"Target - Timestep {c+1}", delta=new_scale)
 
         # Save the plot
         # Design the name of the file
         if bot_or_top == "bot":
-            name_file = f"Lowest/Lowest {len(predictions) - i} file"
+            name_file = f"Lowest/Lowest {len(predictions_final) - i} file"
         elif bot_or_top == "top":
             name_file = f"Best/Best {i + 1} file"
         else:
@@ -122,7 +127,7 @@ def load_model(model, filepath):
 
 
 def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
-         criterion, batch_size, asked_model, model_parameters, delta, n_inputs):
+         criterion, batch_size, asked_model, model_parameters, delta, n_inputs, nb_steps, beta):
     
     output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
 
@@ -148,11 +153,12 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
 
     print("Loading diffusion")
     in_channels = 2*(temp_factor) + 1
-    model_diffu = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256)
+    model_diffu = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128)
     model_diffu = load_model(model_diffu, filepath_diffu)  # Load the weights
     model_diffu.to(device)
 
-    scheduler = DiffusionScheduler(timesteps=1000)
+    scheduler = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1])
+    temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_inputs).to(device).eval()
 
     # Loading the test dataset
 
@@ -197,7 +203,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
         return l1_sorted, l2_sorted
 
     plot_first_samples = True
-    best_worst_to_plot = 5 # Number of best / worst sample to plot
+    best_worst_to_plot = 10 # Number of best / worst sample to plot
 
     with torch.no_grad():
         for list_low_res, channel, target, time_idx in test_loader:
@@ -206,10 +212,13 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
             for k in range(len(list_low_res)):
                 list_low_res[k] = list_low_res[k].to(device)
 
-            output = model_deter(list_low_res, channel)     # Compute the output of the deterministic model
+            # Compute the output of the deterministic model
+            output_deter = model_deter(list_low_res, channel, apply_constraint = True)     
 
+            # Compute the output of the diffusion model
             A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
-            B_pred = sample_diffusion(model_diffu, scheduler, A_seq, n_input = n_inputs, C = output, num_steps=1000) # Compute the output of the diffusion model
+
+            B_pred = sample_diffusion(model_diffu, scheduler, A_seq, C = output_deter, temporal_encoder = temporal_encoder, num_steps=1000) 
 
 
             test_loss = criterion(B_pred, target) # Compute the average loss for each of the specified metric
@@ -220,9 +229,9 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
             except: # If it doesn't exist, initialize the total loss with the first loss
                 total_test_loss = test_loss 
 
-            # Plot some random predictions for the first batch
+            # Plot some random predictions (from the deterministic only AND for the whole model) for the first batch
             if plot_first_samples == True:
-                save_images(list_low_res, time_idx, B_pred, channel, target, output_dir=output_dir_images, delta = delta)
+                save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, delta = delta)
                 plot_first_samples = False
 
             # Update if it is a good/bad sample

@@ -18,7 +18,8 @@ from baseline import nearest_neighbor, bicubic
 
 # Import diffusion model
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
-from diffusion_model import UNetforDiffusion, setup_input, TemporalEncoder, bicubic_A_seq, DiffusionScheduler
+from diffusion_model import UNetforDiffusion, TemporalEncoder, DiffusionScheduler
+from tools_diffu import setup_input, bicubic_A_seq
 
 import wandb
 
@@ -28,7 +29,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Train the model a,d returns the average loss & the weights
 def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
-          temp_factor, spatial_factor, n_input, loss_function = nn.L1Loss(), 
+          temp_factor, spatial_factor, n_input, loss_function, nb_steps, beta,
           testing = True, saving = False, save_dir = None, split = None, name_run = "run", treshold_constraint = 1):
 
     assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
@@ -60,13 +61,16 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     elif asked_model == "nearest_neighbor":
         model_deter = nearest_neighbor(temp_factor=temp_factor, spatial_factor=spatial_factor).to(device)
 
-    # Define the diffusion model
+    # Define the diffusion model, the encoding strategy & the noise scheduler
     in_channels = 2*(temp_factor) + 1
     model_diffusion = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128).to(device)
 
+    temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_input).to(device).train()
+    scheduler_diff = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1])
+
     # Define the loss function & optimizer
     criterion = loss_function
-    optimizer = optim.Adam(model_deter.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(list(model_deter.parameters()) + list(model_diffusion.parameters()), lr=learning_rate)
     scheduler = scheduler(optimizer = optimizer) # We use a scheduler to control the global learning rate
 
     # Training
@@ -74,17 +78,12 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     for epoch in range(1, epochs + 1):
         print(f"Epoch {epoch}")
         model_deter.train()
-
-        temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_input).to(device).train()
-        scheduler_diff = DiffusionScheduler(timesteps=100)
+        model_diffusion.train()
 
         total_loss = 0
 
-        # To compute progress over the epoch
-        n = train_dataset.__len__()
-        
+        # Loop over the batches        
         for list_low_res, channel, target, time_idx in tqdm(train_loader, desc="Training", leave=False):
-
 
             channel, target = channel.to(device), target.to(device)
             for k in range(len(list_low_res)):
@@ -94,22 +93,21 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 apply_constraint = True
 
             # Compute the output of the deterministic model
-            output = model_deter(list_low_res, channel, apply_constraint = apply_constraint)     # Compute the output
+            output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint)     # Compute the output
 
             ### Compute the output of the diffusion model
-
             A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
             # Pass the input as the right format for the diffusion model
             model_input, temporal_embed, t, noise = setup_input(device = device, 
                                           scheduler = scheduler_diff, 
                                           A_seq = A_seq, 
-                                          C = output, 
+                                          C = output_deter, 
                                           B = target, 
                                           temporal_encoder = temporal_encoder)
 
             pred_noise = model_diffusion(model_input, temporal_embed, t)
 
-            loss = F.mse_loss(pred_noise, noise)      # Compute the loss (MSE over the noise)
+            loss = criterion(pred_noise, noise)      # Compute the loss (MSE over the noise)
 
             optimizer.zero_grad()                   # Set the gradients to 0                
             loss.backward()                         # Compute the gradients
@@ -122,27 +120,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             if epoch_batch == "batch":
                 scheduler.step() # Tune the learning rate value
 
-        def print_sample():
-            print("noised residual", model_input[0][0])
-            print("bicubic", model_input[0][1])
-            print("deter", model_input[0][2])
-            print("target", target[0])
-            print("low res", list_low_res[-1][0])
-            print(t[0])
-            print("true noise", noise[0][0])
-            print("predicted noise", pred_noise[0][0])
-
-        print_sample()
-
-
-        def print_grad():
-            for name, param in model_diffusion.named_parameters():
-                if param.grad is not None:
-                    print(f"{name}: grad norm = {param.grad.norm().item():.4f}")
-                else:
-                    print(f"{name}: NO grad")
-
-        print_grad()
 
         if epoch_batch == "epoch":
             scheduler.step() # Tune the learning rate value
@@ -154,37 +131,48 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
     loss_to_return = avg_loss # If one is only training, the function returns the training loss
 
+    ####################################################################################################################################################
+    # N'EST PAS A JOUR ################################################################################################################################
+    ####################################################################################################################################################
+
     # Test the model on the testing dataset if asked
     if testing == True:
         # Evaluate the model on the testing dataset
         print("Validating")
         model_deter.eval()
+        model_diffusion.eval()
         total_test_loss = 0
 
         # To compute progress over testing
-        p = 0 
-        n = test_dataset.__len__()
         with torch.no_grad():
-            for list_low_res, channel, target, time_idx in test_loader:
-                print(f"Validating progress : {100*p/n:.2f}%")
-                p += batch_size 
+            for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
 
                 channel, target = channel.to(device), target.to(device)
                 for k in range(len(list_low_res)):
                     list_low_res[k] = list_low_res[k].to(device)
 
-                output = model_deter(list_low_res, channel)
+                # Compute the output of the deterministic model
+                output_deter = model_deter(list_low_res, channel, apply_constraint = True)    
 
-                test_loss = criterion(output, target)
+                ### Compute the output of the diffusion model
+                A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
+                # Pass the input as the right format for the diffusion model
+                model_input, temporal_embed, t, noise = setup_input(device = device, 
+                                            scheduler = scheduler_diff, 
+                                            A_seq = A_seq, 
+                                            C = output_deter, 
+                                            B = target, 
+                                            temporal_encoder = temporal_encoder)
+
+                pred_noise = model_diffusion(model_input, temporal_embed, t)
+
+                test_loss = criterion(pred_noise, noise)      # Compute the loss (MSE over the noise)
+
                 total_test_loss += test_loss.item()
 
         avg_test_loss = total_test_loss / len(test_loader)
-        print(f"Validating Loss after Epoch {epoch}: {avg_test_loss}")
+        print(f"Validating Loss : {avg_test_loss}")
         loss_to_return = avg_test_loss
-
-    # Save the weights if asked
-    if saving == True:
-        torch.save({'model_state_dict': model_deter.state_dict()}, save_dir)
 
     return model_deter.state_dict(), model_diffusion.state_dict(), loss_to_return
 

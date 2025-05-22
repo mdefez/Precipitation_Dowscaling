@@ -36,10 +36,10 @@ if torch.cuda.is_available():
 # Super resolution factors
 temp_factor = 1
 spatial_factor = 10
-n_inputs = 1        # Frames to take into account as input, the last one is the image to downscale
+n_inputs = 4        # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
-n_days_train = 5 # Only first n_days are used for each month
+n_days_train = 30 # Only first n_days are used for each month
 n_days_test = 2
 
 # Choose wether we want to train/test/both
@@ -50,9 +50,9 @@ testing = True
 cross_val = False # If we want to perform cross validation or simple training
 
 # Training features
-batch_size = 128
-epochs = 10
-learning_rate = 1e-5
+batch_size = 64
+epochs = 15
+learning_rate = 1e-4
 
 # Data directories
 input_dir = f'/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/spatial_{spatial_factor}_temp_{temp_factor}'          # Low res frames
@@ -60,42 +60,42 @@ output_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/tar
 channel_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/DEM'    # DEM
 
 # Available models. One should choose a model and fill the corresponding parameters
-available_model = ["UNet_with_attention", "nearest_neighbor", "bicubic"]
-required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n_inputs", "attention strategy", "number of heads"),
+available_model_deter = ["UNet_with_attention", "nearest_neighbor", "bicubic"]
+required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n_inputs", "attention strategy", "number of heads", "window_size"),
                              "nearest_neighbor" : [None],
                              "bicubic" : [None]}
 
+### Deterministic model ###
 # Hard constraint mass
 available_strategy_mass = [None, "additive", ("multiplicative", "a function type that operates on tensors")] # The function should apply element wise for tensors
 def f_mass(x): # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and i thould not diverge when x is big
     return 1e-3 + x 
-treshold_constraint = 1 # Epoch where we should begin to apply conservative transformation
+treshold_constraint = 10 # Epoch where we should begin to apply conservative transformation
 
 # Attention parameters
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
-strat_attention = [None]
+strat_attention = ["time", "space"]
 
 nb_heads = 4        # Number of attention heads used during the MHA (both for time & space)
+window_size = 3     # window size for spatial attention
+if "space" not in strat_attention:
+    window_size = None
 
 # Choice of the model and parameters
-model = "UNet_with_attention" 
-model_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads)
+model_deter = "UNet_with_attention" 
+model_deter_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads, window_size)
 
-
+### Diffusion model ###
+nb_steps = 1000
+beta = (1e-4, 0.02)
 
 # Loss function (used for training)
-base_loss = nn.L1Loss       # Fill with nn.L1Loss or nn.MSELoss
-conservative = False        # If we add the conservative mass soft constraint
-lambda_conservative = 0.3
-autocorrel = False          # If we add the autocorrelation soft constraint
-lambda_autocorr = 0.3
-
-loss_function = nn.MSELoss()
+base_loss = nn.MSELoss       # Loss function on the predicted/true noise
 
 name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE"}
 
 # Metric (used for testing)
-metric_test = [nn.MSELoss, nn.L1Loss, PercentileDifferenceLoss]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
+metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
 name_metric = [name_loss[metric] for metric in metric_test]     # Name of the metrics
 df_metric = pd.DataFrame({"Name" : name_metric, "Metric" : metric_test})
 
@@ -105,7 +105,7 @@ metric = LossTest(df_metric=df_metric)
 dict_scheduler = {"Step decay" : ("Step decay", "epoch", partial(StepLR, step_size= 10, gamma=0.2)), # Every step_size epoch, multiply the learning rate by gamma
                   "Cyclical" : ("Cyclical", "batch", partial(CyclicLR, base_lr=learning_rate, max_lr=learning_rate * 10, step_size_up=100, mode='triangular2'))} # The lr goes from min to max in a step_size period. After each cycle, the max value is divided by 2
 
-scheduler = dict_scheduler["Step decay"] # Choose the strategy here
+scheduler = dict_scheduler["Cyclical"] # Choose the strategy here
 
 # Normalization strategies
 dict_strategies = ["Standard", "min_max", "Robust"]
@@ -115,10 +115,9 @@ strat_dem = "min_max"
 
 
 # Design the name of the run
-name_of_the_run = f"{name_loss[base_loss]}_input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_heads_{nb_heads}_delay_constraint_{treshold_constraint}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
-name_of_the_run = "test"
+name_of_the_run = f"input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
 
-if model in ["bicubic", "nearest_neighbor"]: # If the model is not trainable
+if model_deter in ["bicubic", "nearest_neighbor"]: # If the model is not trainable
     name_of_the_run = f"loss_{name_loss[base_loss]}"
 
 ####################################################################################################################################################################################
@@ -129,12 +128,12 @@ if model in ["bicubic", "nearest_neighbor"]: # If the model is not trainable
 assert not ("time" in strat_attention and n_inputs == 1), "You want to compute temporal attention with a 1-input sequence"
 assert not ("time" not in strat_attention and n_inputs != 1), "You want multiple inputs without computing temporal attention"
 assert epochs >= treshold_constraint, "The treshold for the mass conservation constraint is set after the number of epochs"
-assert model in available_model, "Model not part of available model"
+assert model_deter in available_model_deter, "Model not part of available model"
 assert strat_attention in list_strat_attention , "Attention strategies not in the list of available attention strategies"
-assert len(model_parameters) == len(required_model_parameters[model]), "Wrong number of model parameters filled"
+assert len(model_deter_parameters) == len(required_model_parameters[model_deter]), "Wrong number of model parameters filled"
 assert not (n_days_test == 1 or n_days_train == 1), "Training or Testing set is empty, don't set n_days to 1"
-assert not (training == True and model in ["nearest_neighbor", "bicubic"]), "You are trying to train an untrainable model"
-assert not (model in ["nearest_neighbor", "bicubic"] and n_inputs != 1), "You should not set n_inputs to more than 1 if you are using untrainable models"
+assert not (training == True and model_deter in ["nearest_neighbor", "bicubic"]), "You are trying to train an untrainable model"
+assert not (model_deter in ["nearest_neighbor", "bicubic"] and n_inputs != 1), "You should not set n_inputs to more than 1 if you are using untrainable models"
 assert strat_dem in dict_strategies and strat_precip in dict_strategies, "You chose an unavailable scaling strategies"
 
 # CV pipeline 
@@ -158,11 +157,11 @@ if training:
     weights_deter, weights_diffu, loss, best_stats_precip, best_stats_dem = training_strategy(dico_dataset = dico_dataset, normalizing = normalizing, 
                                                                          strat_precip = strat_precip, strat_dem = strat_dem, 
                                                                          batch_size = batch_size, epochs = epochs, scheduler = scheduler, 
-                                                                         learning_rate = learning_rate, loss_function = loss_function, 
+                                                                         learning_rate = learning_rate, loss_function = base_loss(), 
                                                                          name_of_the_run = name_of_the_run, temp_factor = temp_factor, 
-                                                                         spatial_factor = spatial_factor, model = model, 
-                                                                         model_parameters = model_parameters, treshold_constraint = treshold_constraint,
-                                                                         n_input = n_inputs)
+                                                                         spatial_factor = spatial_factor, model = model_deter, 
+                                                                         model_parameters = model_deter_parameters, treshold_constraint = treshold_constraint,
+                                                                         n_input = n_inputs, nb_steps = nb_steps, beta = beta)
 
     # Save the best model & the associated normalization
     tool.save_model_deter(weights_deter, name_of_the_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
@@ -170,7 +169,7 @@ if training:
     if normalizing:
         tool.save_transfo(output_path = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/normalization", 
                  best_stats_precip = best_stats_precip, best_stats_dem = best_stats_dem, strat_dem = strat_dem, strat_precip = strat_precip)
-    print(f"\nBest model saved with score: {loss}")
+    print(f"\nModel saved with score: {loss}")
 
 end_time_training = time.time()
 print(f"Training : {int((end_time_training - start_time) / 60)} minutes")
@@ -199,7 +198,8 @@ if testing:
     print("Data normalized")
 
     test(test_dataset=normalized_test_dataset, spatial_factor=spatial_factor, temp_factor=temp_factor, name_of_the_run=name_of_the_run,
-         criterion=metric, batch_size=batch_size, asked_model=model, model_parameters=model_parameters, delta = delta, n_inputs = n_inputs)
+         criterion=metric, batch_size=batch_size, asked_model=model_deter, model_parameters=model_deter_parameters, delta = delta, n_inputs = n_inputs,
+         nb_steps = nb_steps, beta = beta)
 
 
 end_time_testing = time.time()

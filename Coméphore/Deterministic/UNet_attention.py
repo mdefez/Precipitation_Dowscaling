@@ -88,7 +88,7 @@ class LocalSpatialAttention(nn.Module):
 
         # Unfold to get local windows for each pixel
         patches = F.unfold(last_image, kernel_size = self.window_size, padding = self.window_size // 2)  # shape: (B, C*n², H*W)
-        print(patches.shape)
+
         patches = patches.transpose(1, 2).contiguous().view(B*H*W, self.window_size**2, C)  # (B*H*W, n², C)
 
         attn_output = self.model(patches)       # (B*H*W, n², C)
@@ -118,6 +118,7 @@ class UNet_with_attention(nn.Module):
         self.n_inputs = model_parameters[1]
         self.attention = model_parameters[2]                # Attention strategy
         self.nb_heads = model_parameters[3]                 # Number of heads for the MHA
+        self.window_size = model_parameters[4]              # window size for spatial attention
 
         self.base_channels = base_channels
 
@@ -137,11 +138,11 @@ class UNet_with_attention(nn.Module):
         self.conv_between_bottleneck = self.conv_block(base_channels * 16, base_channels * 16)
 
         # Spatial attention
-        self.spatial_attn1 = LocalSpatialAttention(channels = base_channels, num_heads = self.nb_heads, window_size = 21)
-        self.spatial_attn2 = LocalSpatialAttention(channels = base_channels * 2, num_heads = self.nb_heads, window_size = 11)
-        self.spatial_attn3 = LocalSpatialAttention(channels = base_channels * 4, num_heads = self.nb_heads, window_size = 5)
-        self.spatial_attn4 = LocalSpatialAttention(channels = base_channels * 8, num_heads = self.nb_heads, window_size = 3)
-        self.spatial_attn_bottleneck = LocalSpatialAttention(channels = base_channels * 16, num_heads = self.nb_heads, window_size = 1)
+        self.spatial_attn1 = LocalSpatialAttention(channels = base_channels, num_heads = self.nb_heads, window_size = self.window_size)
+        self.spatial_attn2 = LocalSpatialAttention(channels = base_channels * 2, num_heads = self.nb_heads, window_size = self.window_size)
+        self.spatial_attn3 = LocalSpatialAttention(channels = base_channels * 4, num_heads = self.nb_heads, window_size = self.window_size)
+        self.spatial_attn4 = LocalSpatialAttention(channels = base_channels * 8, num_heads = self.nb_heads, window_size = self.window_size)
+        self.spatial_attn_bottleneck = LocalSpatialAttention(channels = base_channels * 16, num_heads = self.nb_heads, window_size = self.window_size)
 
 
         # Encoder
@@ -165,8 +166,11 @@ class UNet_with_attention(nn.Module):
         self.transconv2 = self.upconv(base_channels * 4, base_channels * 2, 2, 2)
         self.transconv1 = self.upconv(base_channels * 2, base_channels, 2, 2)
 
-        # Or we can use upsampling
-        # To fill
+        # Or we can use upsampling + conv 
+        self.upsampling4 = self.upsample(base_channels * 16, base_channels * 8)
+        self.upsampling3 = self.upsample(base_channels * 8, base_channels * 4)
+        self.upsampling2 = self.upsample(base_channels * 4, base_channels * 2)
+        self.upsampling1 = self.upsample(base_channels * 2, base_channels)
 
         # Or pixel shuffling
         # To fill
@@ -185,7 +189,8 @@ class UNet_with_attention(nn.Module):
         self.conv_between = nn.ModuleList([self.conv_between1, self.conv_between2, self.conv_between3, self.conv_between4])
         self.spatial_attention_blocks = nn.ModuleList([self.spatial_attn1, self.spatial_attn2, self.spatial_attn3, self.spatial_attn4])
 
-        self.upconvs  = nn.ModuleList([self.transconv4, self.transconv3, self.transconv2, self.transconv1])
+        # Choose the decoder strategy here
+        self.up_decoder  = nn.ModuleList([self.upsampling4, self.upsampling3, self.upsampling2, self.upsampling1])
         self.decoders = nn.ModuleList([self.decoder4, self.decoder3, self.decoder2, self.decoder1])
 
 
@@ -220,9 +225,13 @@ class UNet_with_attention(nn.Module):
         return nn.ConvTranspose2d(in_channels, out_channels, stride, padding)
     
 
-    def upsample(self, scale_factor=2):
-        return nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=False)
-        
+    def upsample(self, in_channels, out_channels):
+        return nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bicubic', align_corners=True),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
 
     # To apply to each aggregated frame (so that we keep the frame aspect thus we are allowed to compute temporal attention)
     # One can also apply those functions to a sequence of one image (without computing attention)
@@ -287,8 +296,8 @@ class UNet_with_attention(nn.Module):
 
         # Decoder
         x = x_bottleneck
-        for i in range(len(self.upconvs)):
-            x = self.upconvs[i](x)
+        for i in range(len(self.up_decoder)):
+            x = self.up_decoder[i](x)
             skip = encoder_outputs[-(i+1)]  
             x = self.pad_to_match(x, skip)
             x = torch.cat([x, skip], dim=1)
