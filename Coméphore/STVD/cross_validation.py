@@ -9,7 +9,8 @@ import tools as tool
 # Main function that trains the model with the specified training dataset
 def main(train_dataset, val_dataset, normalizing, strat_precip, strat_dem,
         batch_size, epochs, scheduler, learning_rate, loss_function, k, name_of_the_run, 
-        temp_factor, spatial_factor, model, model_parameters, treshold_constraint, testing, n_input, nb_steps, beta):
+        temp_factor, spatial_factor, model, model_parameters, treshold_constraint_deter, testing, n_input, 
+        model_parameters_diffusion):
     
     # Normalize the data according to the specified strategies
 
@@ -41,11 +42,10 @@ def main(train_dataset, val_dataset, normalizing, strat_precip, strat_dem,
                         spatial_factor = spatial_factor,
                         asked_model=model,
                         model_parameters=model_parameters,
-                        treshold_constraint=treshold_constraint,
+                        treshold_constraint_deter=treshold_constraint_deter,
                         testing = testing,
                         n_input = n_input,
-                        nb_steps = nb_steps,
-                        beta = beta)
+                        model_parameters_diffusion = model_parameters_diffusion)
     
     return weights_deter, weights_diffu, loss, stats_precip, stats_dem
 
@@ -53,7 +53,8 @@ def main(train_dataset, val_dataset, normalizing, strat_precip, strat_dem,
 
 # Performs the k-fold cross validation
 def k_fold(dico_dataset, normalizing, strat_precip, strat_dem, batch_size, epochs, scheduler, learning_rate, 
-                    loss_function, name_of_the_run, temp_factor, spatial_factor, model, model_parameters, treshold_constraint, n_input, nb_steps, beta):
+                    loss_function, name_of_the_run, temp_factor, spatial_factor, model, model_parameters, treshold_constraint_deter, n_input, 
+                     model_parameters_diffusion):
 
     # This represents the 4 sub domains, we then perform a 4-fold CV on them
     # We split the domain into "diagonals" so that the validation dataset 
@@ -89,8 +90,9 @@ def k_fold(dico_dataset, normalizing, strat_precip, strat_dem, batch_size, epoch
 
         weights_deter, weights_diffu, loss, stats_precip, stats_dem = main(train_dataset, val_dataset, normalizing, strat_precip, strat_dem,
                                                       batch_size, epochs, scheduler, learning_rate, loss_function, k, name_of_the_run, 
-                                                      temp_factor, spatial_factor, model, model_parameters, treshold_constraint, n_input = n_input,
-                                                      testing = True, nb_steps = nb_steps, beta = beta)
+                                                      temp_factor, spatial_factor, model, model_parameters, treshold_constraint_deter, n_input = n_input,
+                                                      testing = True, 
+                                                      model_parameters_diffusion = model_parameters_diffusion)
 
         print(f"Loss on split {k+1}: {loss}")
 
@@ -106,14 +108,16 @@ def k_fold(dico_dataset, normalizing, strat_precip, strat_dem, batch_size, epoch
 
 # Performs simple training
 def simple_training(dico_dataset, normalizing, strat_precip, strat_dem, batch_size, epochs, scheduler, learning_rate, 
-                    loss_function, name_of_the_run, temp_factor, spatial_factor, model, model_parameters, treshold_constraint, n_input, nb_steps, beta):
+                    loss_function, name_of_the_run, temp_factor, spatial_factor, model, model_parameters, treshold_constraint_deter, n_input, 
+                     model_parameters_diffusion):
 
     list_train_dataset = list(dico_dataset.values())
     train_dataset = ConcatDataset(list_train_dataset)
 
     weights_deter, weights_diffu, loss, stats_precip, stats_dem = main(train_dataset, None, normalizing, strat_precip, strat_dem,
                                                       batch_size, epochs, scheduler, learning_rate, loss_function, None, name_of_the_run, 
-                                                      temp_factor, spatial_factor, model, model_parameters, treshold_constraint, 
-                                                      n_input = n_input, testing = False, nb_steps = nb_steps, beta = beta)
+                                                      temp_factor, spatial_factor, model, model_parameters, treshold_constraint_deter, 
+                                                      n_input = n_input, testing = False,
+                                                      model_parameters_diffusion = model_parameters_diffusion)
 
     return weights_deter, weights_diffu, loss, stats_precip, stats_dem

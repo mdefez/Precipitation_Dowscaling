@@ -10,8 +10,6 @@ import torch.nn.functional as F
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-
 # Takes (B, T, C) as input and returns same size by passing it to an attention mecanism
 # B is the batch, T is the sequence of tokens, C are the token's channels
 class SelfAttentionBlock(nn.Module):
@@ -375,7 +373,7 @@ class UNet_with_attention(nn.Module):
 
 
 
-    def forward(self, frames, dem, apply_constraint = True): # frames is a list of coarse inputs, dem is the dem associated to the tile
+    def forward(self, frames, dem, apply_constraint): # frames is a list of coarse inputs, dem is the dem associated to the tile
 
         # frames = [frame_0, ..., frame_-1] where frame = (B, 1, 1, H, W) & dem = (B, 1, 100, 100)
 
@@ -419,8 +417,9 @@ class UNet_with_attention(nn.Module):
 
             ### THIRD STEP
             # Here we apply (if asked) the hard constraint mass strategy
-            output_non_null = self.apply_conservative_strategy_whole_frames(prediction=output_non_null,
-                                                          last_frame=frames_non_null[-1])       # [B', self.temp_factor, H, W]
+            if apply_constraint == True:
+                output_non_null = self.apply_conservative_strategy_whole_frames(prediction=output_non_null,
+                                                            last_frame=frames_non_null[-1])       # [B', self.temp_factor, H, W]
 
             # Setting the outputs
             outputs[non_null_mask.squeeze()] = output_non_null  # [B, self.temp_factor, H, W]

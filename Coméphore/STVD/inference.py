@@ -1,18 +1,20 @@
 import torch
+import torch.nn as nn
 from tqdm import tqdm
 
 import sys
 
 # Import functions from other files
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
-from tools_diffu import setup_input_inference
+from tools_diffu import setup_input_inference, apply_conservative_regridding_final_output
+
 
 @torch.no_grad()
-def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps=1000, device="cuda"):
+def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps, last_frame, conservative_mass_diffusion, device="cuda"):
     B, T, Channel, H, W = A_seq.shape
 
     A_seq = A_seq.to(device)
-    C = C.to(device) # (B, C, H, W)
+    C = C.to(device) # (B, C, H, W) where C = temp_factor
 
     # Initial sample: R_T ~ N(0, I)
     R_t = torch.randn_like(C).to(device)
@@ -40,6 +42,7 @@ def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps=100
         beta_t = torch.clamp(beta_t, 0.0001, 0.9999)  # sécurité numérique
 
         # Posterior mean estimate for R_{t-1}
+
         coef1 = (1 / torch.sqrt(alpha_bar_t))
         coef2 = (1 - alpha_bar_t).sqrt()
         R_0_est = (R_t - coef2 * pred_epsilon) / coef1
@@ -53,5 +56,10 @@ def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps=100
 
     # Given the residual, we can compute the true output
     B_pred = C + R_t
+    B_pred = nn.ReLU()(B_pred)            # We can put ReLU because we want non negative output for precipitation
+
+    # Conservative regridding
+    B_pred = apply_conservative_regridding_final_output(B_pred = B_pred, LR_input = last_frame, spatial_factor = model.spatial_factor,
+                                                        temp_factor = model.temp_factor, hard_constraint_mass = conservative_mass_diffusion)
 
     return B_pred

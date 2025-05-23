@@ -34,16 +34,16 @@ if torch.cuda.is_available():
 
 
 # Super resolution factors
-temp_factor = 1
-spatial_factor = 10
-n_inputs = 4        # Frames to take into account as input, the last one is the image to downscale
+temp_factor = 3
+spatial_factor = 1
+n_inputs = 3       # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
-n_days_train = 30 # Only first n_days are used for each month
+n_days_train = 3 # Only first n_days are used for each month
 n_days_test = 2
 
 # Choose wether we want to train/test/both
-training = True 
+training = False 
 normalizing = False # If False, the code will import the last normalizer saved
 testing = True 
 
@@ -51,7 +51,7 @@ cross_val = False # If we want to perform cross validation or simple training
 
 # Training features
 batch_size = 64
-epochs = 15
+epochs = 10
 learning_rate = 1e-4
 
 # Data directories
@@ -70,7 +70,7 @@ required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n
 available_strategy_mass = [None, "additive", ("multiplicative", "a function type that operates on tensors")] # The function should apply element wise for tensors
 def f_mass(x): # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and i thould not diverge when x is big
     return 1e-3 + x 
-treshold_constraint = 10 # Epoch where we should begin to apply conservative transformation
+treshold_constraint_deter = 5 # Epoch where we should begin to apply conservative transformation for the deterministic model
 
 # Attention parameters
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
@@ -88,6 +88,11 @@ model_deter_parameters = (("multiplicative", f_mass), n_inputs, strat_attention,
 ### Diffusion model ###
 nb_steps = 1000
 beta = (1e-4, 0.02)
+
+conservative_mass_diffusion = ("multiplicative", f_mass)
+
+model_parameters_diffusion = (nb_steps, beta, conservative_mass_diffusion)
+
 
 # Loss function (used for training)
 base_loss = nn.MSELoss       # Loss function on the predicted/true noise
@@ -115,7 +120,7 @@ strat_dem = "min_max"
 
 
 # Design the name of the run
-name_of_the_run = f"input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
+name_of_the_run = f"input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint_deter}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
 
 if model_deter in ["bicubic", "nearest_neighbor"]: # If the model is not trainable
     name_of_the_run = f"loss_{name_loss[base_loss]}"
@@ -127,7 +132,7 @@ if model_deter in ["bicubic", "nearest_neighbor"]: # If the model is not trainab
 # Check for valid settings
 assert not ("time" in strat_attention and n_inputs == 1), "You want to compute temporal attention with a 1-input sequence"
 assert not ("time" not in strat_attention and n_inputs != 1), "You want multiple inputs without computing temporal attention"
-assert epochs >= treshold_constraint, "The treshold for the mass conservation constraint is set after the number of epochs"
+assert epochs >= treshold_constraint_deter, "The treshold for the mass conservation constraint is set after the number of epochs"
 assert model_deter in available_model_deter, "Model not part of available model"
 assert strat_attention in list_strat_attention , "Attention strategies not in the list of available attention strategies"
 assert len(model_deter_parameters) == len(required_model_parameters[model_deter]), "Wrong number of model parameters filled"
@@ -160,8 +165,9 @@ if training:
                                                                          learning_rate = learning_rate, loss_function = base_loss(), 
                                                                          name_of_the_run = name_of_the_run, temp_factor = temp_factor, 
                                                                          spatial_factor = spatial_factor, model = model_deter, 
-                                                                         model_parameters = model_deter_parameters, treshold_constraint = treshold_constraint,
-                                                                         n_input = n_inputs, nb_steps = nb_steps, beta = beta)
+                                                                         model_parameters = model_deter_parameters, treshold_constraint_deter = treshold_constraint_deter,
+                                                                         n_input = n_inputs, 
+                                                                         model_parameters_diffusion = model_parameters_diffusion)
 
     # Save the best model & the associated normalization
     tool.save_model_deter(weights_deter, name_of_the_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
@@ -199,7 +205,7 @@ if testing:
 
     test(test_dataset=normalized_test_dataset, spatial_factor=spatial_factor, temp_factor=temp_factor, name_of_the_run=name_of_the_run,
          criterion=metric, batch_size=batch_size, asked_model=model_deter, model_parameters=model_deter_parameters, delta = delta, n_inputs = n_inputs,
-         nb_steps = nb_steps, beta = beta)
+         model_parameters_diffusion = model_parameters_diffusion)
 
 
 end_time_testing = time.time()

@@ -126,8 +126,10 @@ class ConvBlock(nn.Module):
 
 
 class UNetforDiffusion(nn.Module):
-    def __init__(self, in_channels, base_channels, embed_dim, time_emb_dim):
+    def __init__(self, in_channels, base_channels, embed_dim, time_emb_dim, temp_factor, spatial_factor):
         super().__init__()
+        self.temp_factor = temp_factor
+        self.spatial_factor = spatial_factor
 
         # Denoising step as a vector
         self.time_emb = TimeEmbedding(time_emb_dim)
@@ -159,7 +161,7 @@ class UNetforDiffusion(nn.Module):
         self.upconv = nn.ModuleList([self.upconv1, self.upconv2, self.upconv3])
 
         # Final layer
-        self.final = nn.Conv2d(base_channels, 1, 1)  # Predict 1-channel residual (the noise)
+        self.final = nn.Sequential(nn.Conv2d(in_channels = base_channels, out_channels = self.temp_factor, kernel_size = 1))  # Predict 1-channel residual (the noise)
 
     # To match x's size to target before concatenating
     def pad_to_match(self, x, target):
@@ -174,7 +176,9 @@ class UNetforDiffusion(nn.Module):
         x_padded = F.pad(x, (pad_left, pad_right, pad_top, pad_bottom), mode='replicate') # We can use either "replicate" or "reflect" 
         return x_padded
 
-    def forward(self, x, temporal_embedding, t):
+
+
+    def forward(self, x, temporal_embedding, t):      # "Real" diffusion model, the real forward is right after
 
         t_emb = self.time_emb(t)  # (B, time_emb_dim), denoising step
 
@@ -203,6 +207,14 @@ class UNetforDiffusion(nn.Module):
         output = self.final(d)
 
         return output
+    
+
+
+
+
+
+
+
 
 
 

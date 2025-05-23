@@ -5,18 +5,18 @@ import torch.nn.functional as F
 
 
 def setup_input(device, scheduler, A_seq, C, B, temporal_encoder): # Set up input/output for the diffusion model.
-    A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1, precip 
-    C = C.to(device)                    # (B, C_C, H, W) where C_C = temp_factor
-    B = B.to(device)                    # (B, C_B, H, W) where C_B = temp_factor
+    A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1. Output of the bicubic interpolation
+    C = C.to(device)                    # (B, C_C, H, W) where C_C = temp_factor. Prediction of the deterministic model
+    B = B.to(device)                    # (B, C_B, H, W) where C_B = temp_factor. Ground truth
 
-    R = B - C                           # résidu à apprendre, (B, C, H, W)
+    R = B - C                           # Residuals, (B, C, H, W)
 
     # échantillonner un timestep t pour chaque élément du batch
     B_size = B.size(0)
     t = torch.randint(0, scheduler.timesteps, (B_size,), device=device)     # Denoising step
 
     noise = torch.randn_like(R)
-    R_t = scheduler.q_sample(R, t, noise=noise)
+    R_t = scheduler.q_sample(R, t, noise=noise) # Noised residuals, (B, C, H, W)
 
     # encodeur temporel sur A pour extraire des features et coder l'aspect séquentiel
     temporal_input = A_seq.clone()  # (B, T, C, H, W)
@@ -33,7 +33,6 @@ def setup_input_inference(device, R_t, A_seq, C, temporal_encoder): # Set up inp
     A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1, precip 
     C = C.to(device)                    # (B, C_C, H, W) where C_C = temp_factor
     R_t = R_t.to(device)                    # (B, C_B, H, W) where C_B = temp_factor
-
 
     # encodeur temporel sur A pour extraire des features et coder l'aspect séquentiel
     temporal_input = A_seq.clone()  # (B, T, C, H, W)
@@ -58,3 +57,75 @@ def bicubic_A_seq(list_frames): # Bicubically interpolate the list of frame to p
     frames_up = torch.cat(frames_up, dim = 1)
 
     return frames_up
+
+
+def apply_conservative_regridding_final_output(B_pred, LR_input, spatial_factor, temp_factor, hard_constraint_mass):
+
+
+    # This function apply conservative regridding for one block (temp_factor * spatial_factor * spatial_factor) VS low res pixel
+    # x_block is (B, N, C*k*k) where C = temp_factor, y_pixel is (B, N, 1). We should perform the transformation for every B & N 
+    # output should be the modified x_block (B, N, C*k*k)
+    def apply_conservative_strategy_block(x_block, y_pixel): 
+        if hard_constraint_mass == "additive":
+
+            # Choose the mass reference. It should be low res (time & space). Here we take the last input 
+            P_LR = y_pixel * temp_factor  # Shape (B', 1, 1, 1, 1)
+
+            # Compute the sum at the denominator
+            sum = x_block.sum(dim=(2), keepdim=True) / (spatial_factor ** 2)  # shape: (B, N, 1)
+
+
+            # Compute the final (constrained) outputs
+            output_final = x_block + (P_LR - sum) * ((spatial_factor / 100)**2) / temp_factor  # shape: (B, N, C*k*k)
+
+            return output_final
+
+        try:
+            if hard_constraint_mass[0] == "multiplicative": # Multiplicative strategy
+                strategy, f = hard_constraint_mass
+
+                f_output = f(x_block)  # shape: (B, N, C*k*k)
+
+                # Compute the mass reference
+                P_LR = y_pixel * temp_factor   # (B, N, 1)
+
+                # Compute the sum at the denominator for the current predictions
+                sum_f = f_output.sum(dim=(2), keepdim=True) / (spatial_factor ** 2)  #  (B, N, 1)
+
+                # Compute the final (constrained) predictions
+                output_final = f_output * (P_LR / sum_f)   # shape: (B, N, C*k*k)
+
+                return output_final
+        
+        except:
+            return x_block
+
+
+    # Apply conservative reggriding LR pixel wise for the whole frame
+    # Prediction is (B, C, H, W), LR last frame is (B, H', W') where C = temp_factor
+    # Returns modified predictions of shape (B, C, H, W)
+    def apply_conservative_strategy_whole_frames(prediction, last_frame):
+        B, C, H, W = prediction.shape
+
+        B, H_p, W_p = last_frame.shape
+
+        # Get each temp_factor * (spatial_factor * spatial_factor) blocks 
+        X_patches = F.unfold(prediction, kernel_size = spatial_factor, stride=spatial_factor)  # (B, C*k*k, N) where N = H'*W'
+        X_patches = X_patches.transpose(1, 2)  # (B, N, C*k*k)
+
+        # Resize the last frame for treatment
+        Y_vals = last_frame.view(B, H_p * W_p, 1)        # (B, N, 1). Low res input 
+
+        # Apply treatment by blocks
+        X_patches_mod = apply_conservative_strategy_block(X_patches, Y_vals)  # (B, N, C*k*k)
+
+        # Resize to fit the expected shape
+        X_patches_mod = X_patches_mod.transpose(1, 2)  # (B, C*k*k, N)
+        X_out = F.fold(X_patches_mod, output_size=(H, W), kernel_size=spatial_factor, stride=spatial_factor) # (B, C, H, W)
+
+        return X_out
+    
+    LR_input = LR_input.squeeze()
+    final_output = apply_conservative_strategy_whole_frames(prediction = B_pred, last_frame= LR_input)
+
+    return final_output

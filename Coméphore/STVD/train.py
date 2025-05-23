@@ -29,8 +29,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Train the model a,d returns the average loss & the weights
 def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
-          temp_factor, spatial_factor, n_input, loss_function, nb_steps, beta,
-          testing = True, saving = False, save_dir = None, split = None, name_run = "run", treshold_constraint = 1):
+          temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion,
+          testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
 
     assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
     assert testing == False or isinstance(test_dataset, Dataset), "Can't test, test dataset not a torch dataset"
@@ -38,6 +38,9 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     assert isinstance(name_run, str), "The name of the run is not a string"
 
     name_scheduler, epoch_batch, scheduler = strategy_scheduler # (Name of the schedule, Time where we need to update the scheduler, Scheduler object)
+
+    apply_constraint_deter = False           # Initialize with False
+    apply_constraint_diffusion = False          # Initialize with False
 
     # To plot the loss on WandB, the run name stores the training features
     wandb.init(project='test', entity='mdefez-cv', name = name_run) 
@@ -62,8 +65,12 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         model_deter = nearest_neighbor(temp_factor=temp_factor, spatial_factor=spatial_factor).to(device)
 
     # Define the diffusion model, the encoding strategy & the noise scheduler
-    in_channels = 2*(temp_factor) + 1
-    model_diffusion = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128).to(device)
+    in_channels = 2*(temp_factor) + 1       # To compute useful dimensions
+
+    nb_steps, beta, conservative_mass_diffusion = model_parameters_diffusion
+
+    model_diffusion = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128, 
+                                       temp_factor = temp_factor, spatial_factor = spatial_factor).to(device)
 
     temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_input).to(device).train()
     scheduler_diff = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1])
@@ -89,11 +96,12 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             for k in range(len(list_low_res)):
                 list_low_res[k] = list_low_res[k].to(device)
             
-            if treshold_constraint >= epoch: # After some epochs, we apply conservative transformation to fine tune the model
-                apply_constraint = True
+            if treshold_constraint_deter >= epoch: # After some epochs, we apply conservative transformation to fine tune the model
+                apply_constraint_deter = True
+
 
             # Compute the output of the deterministic model
-            output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint)     # Compute the output
+            output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint_deter)     # Compute the output
 
             ### Compute the output of the diffusion model
             A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet

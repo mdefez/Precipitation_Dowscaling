@@ -127,7 +127,7 @@ def load_model(model, filepath):
 
 
 def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
-         criterion, batch_size, asked_model, model_parameters, delta, n_inputs, nb_steps, beta):
+         criterion, batch_size, asked_model, model_parameters, delta, n_inputs, model_parameters_diffusion):
     
     output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
 
@@ -151,9 +151,12 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
         model_deter = load_model(model, filepath_deter)  # Load the weights
         model_deter.to(device)
 
-    print("Loading diffusion")
+    print("Loading diffusion model")
     in_channels = 2*(temp_factor) + 1
-    model_diffu = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128)
+    nb_steps, beta, conservative_mass_diffusion = model_parameters_diffusion
+
+    model_diffu = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128, temp_factor = temp_factor, 
+                                   spatial_factor = spatial_factor)
     model_diffu = load_model(model_diffu, filepath_diffu)  # Load the weights
     model_diffu.to(device)
 
@@ -206,8 +209,11 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
     best_worst_to_plot = 10 # Number of best / worst sample to plot
 
     with torch.no_grad():
+        stop = 0
         for list_low_res, channel, target, time_idx in test_loader:
-
+            stop += 1
+            if stop == 10:
+                break
             channel, target = channel.to(device), target.to(device)
             for k in range(len(list_low_res)):
                 list_low_res[k] = list_low_res[k].to(device)
@@ -218,7 +224,8 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
             # Compute the output of the diffusion model
             A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
 
-            B_pred = sample_diffusion(model_diffu, scheduler, A_seq, C = output_deter, temporal_encoder = temporal_encoder, num_steps=1000) 
+            B_pred = sample_diffusion(model_diffu, scheduler, A_seq, C = output_deter, temporal_encoder = temporal_encoder, 
+                                      num_steps=nb_steps, last_frame = list_low_res[-1], conservative_mass_diffusion = conservative_mass_diffusion) 
 
 
             test_loss = criterion(B_pred, target) # Compute the average loss for each of the specified metric
@@ -240,7 +247,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
                 # Worst loss
                 for idx in range(best_worst_to_plot - len(worst_loss)): # Fill it until it reaches the right length
                     worst_loss.append(loss_vector[idx].item()) # add the marginal loss
-                    worst_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[idx], channel[idx], target[idx]]) # add the corresponding sample
+                    worst_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
 
                 worst_loss, worst_sample = sort_l1_l2(worst_loss, worst_sample) # Both list are sorted ascendingly 
 
@@ -250,7 +257,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
                 # Best loss
                 for idx in range(best_worst_to_plot - len(best_loss)): # Fill it until it reaches the right length
                     best_loss.append(loss_vector[idx].item()) # add the marginal loss
-                    best_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[idx], channel[idx], target[idx]]) # add the corresponding sample
+                    best_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
 
                 best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
 
@@ -266,7 +273,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
                     marginal_loss = loss_vector[k].item()
                     if marginal_loss > min_loss_of_the_worst:
                         worst_loss[0] = marginal_loss
-                        worst_sample[0] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[k], channel[k], target[k]]
+                        worst_sample[0] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[k], output_deter[k], channel[k], target[k]]
 
                         # Sort both list again & compute the new min of the highest
                         worst_loss, worst_sample = sort_l1_l2(worst_loss, worst_sample) # Both list are sorted ascendingly 
@@ -275,7 +282,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
 
                     if marginal_loss < max_loss_of_the_best:
                         best_loss[-1] = marginal_loss
-                        best_sample[-1] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[k], channel[k], target[k]]
+                        best_sample[-1] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[k], output_deter[k], channel[k], target[k]]
                         # Sort both list again & compute the new min of the highest
                         best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
 
@@ -289,9 +296,9 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
         return [x[col] for x in worst_sample]
 
     save_images(get_column(worst_sample, 0), get_column(worst_sample, 1), get_column(worst_sample, 2), get_column(worst_sample, 3), get_column(worst_sample, 4),
-                 bot_or_top="bot", output_dir=output_dir_images, best_worst=True, delta = delta)
+                get_column(worst_sample, 5), bot_or_top="bot", output_dir=output_dir_images, best_worst=True, delta = delta)
     save_images(get_column(best_sample, 0), get_column(best_sample, 1), get_column(best_sample, 2), get_column(best_sample, 3), get_column(best_sample, 4),
-                bot_or_top="top", output_dir=output_dir_images, best_worst=True, delta = delta)
+                get_column(best_sample, 5), bot_or_top="top", output_dir=output_dir_images, best_worst=True, delta = delta)
 
     avg_test_loss = total_test_loss / len(test_loader)
     print(f"Test Loss: {avg_test_loss} for the following metrics \n{criterion.name_metric}")
