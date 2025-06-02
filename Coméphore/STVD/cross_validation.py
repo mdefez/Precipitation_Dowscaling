@@ -111,13 +111,16 @@ def simple_training(dico_dataset, normalizing, strat_precip, strat_dem, batch_si
                     loss_function, name_of_the_run, temp_factor, spatial_factor, model, model_parameters, treshold_constraint_deter, n_input, 
                      model_parameters_diffusion):
 
-    list_train_dataset = list(dico_dataset.values())
+    list_train_dataset = list(dico_dataset.values())[:12]
     train_dataset = ConcatDataset(list_train_dataset)
 
-    weights_deter, weights_diffu, loss, stats_precip, stats_dem = main(train_dataset, None, normalizing, strat_precip, strat_dem,
+    list_val_dataset = list(dico_dataset.values())[12:]
+    val_dataset = ConcatDataset(list_val_dataset)
+
+    weights_deter, weights_diffu, loss, stats_precip, stats_dem = main(train_dataset, val_dataset, normalizing, strat_precip, strat_dem,
                                                       batch_size, epochs, scheduler, learning_rate, loss_function, None, name_of_the_run, 
                                                       temp_factor, spatial_factor, model, model_parameters, treshold_constraint_deter, 
-                                                      n_input = n_input, testing = False,
+                                                      n_input = n_input, testing = True,
                                                       model_parameters_diffusion = model_parameters_diffusion)
 
     return weights_deter, weights_diffu, loss, stats_precip, stats_dem

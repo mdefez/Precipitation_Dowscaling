@@ -119,7 +119,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 for k in range(len(list_low_res)):
                     list_low_res[k] = list_low_res[k].to(device)
 
-                output = model(list_low_res, channel)
+                output = model(list_low_res, channel, apply_constraint = True)
 
                 test_loss = criterion(output, target)
                 total_test_loss += test_loss.item()

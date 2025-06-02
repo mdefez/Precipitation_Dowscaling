@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 import sys
 from tqdm import tqdm
+from torch.optim.lr_scheduler import LinearLR, SequentialLR
+
 
 # Import deterministic model
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic')
@@ -54,9 +56,15 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
     # Define the model, loss function & optimizer
     if asked_model == "UNet_with_attention":
+        lambda_mse_deter, epoch_mse_deter = model_parameters[5]     # Strategy for adding (or not) the MSE deterministic into the global loss function
+        dir_weights_deter = model_parameters[6]                     # Get the directory of the deterministic's weights if filled
         model_deter = UNet_with_attention(temp_factor=temp_factor, 
                                     spatial_factor=spatial_factor, 
                                     model_parameters=model_parameters).to(device)
+        
+        if dir_weights_deter != None:       # Load the pretrained deterministic model if asked
+            checkpoint = torch.load(dir_weights_deter, map_location=torch.device(device))
+            model_deter.load_state_dict(checkpoint['model_state_dict'])
         
     elif asked_model == "bicubic":
         model_deter = bicubic(temp_factor=temp_factor, spatial_factor=spatial_factor).to(device)
@@ -79,6 +87,12 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     criterion = loss_function
     optimizer = optim.Adam(list(model_deter.parameters()) + list(model_diffusion.parameters()), lr=learning_rate)
     scheduler = scheduler(optimizer = optimizer) # We use a scheduler to control the global learning rate
+
+    # We add a warmup to the scheduler to deal with eventual bad weights initialization
+    if epoch_batch == "batch":
+        warmup_steps = 500
+        warmup_scheduler = LinearLR(optimizer = optimizer, start_factor=1e-8 / learning_rate, end_factor=1.0, total_iters=warmup_steps)  # Start with a warm up (increase linearly from 0 to lr)
+        scheduler = SequentialLR(optimizer = optimizer, schedulers=[warmup_scheduler, scheduler], milestones=[warmup_steps])  # switch schedulers at warmup_steps
 
     # Training
     print("Training")
@@ -117,6 +131,9 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
             loss = criterion(pred_noise, noise)      # Compute the loss (MSE over the noise)
 
+            if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
+                loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+
             optimizer.zero_grad()                   # Set the gradients to 0                
             loss.backward()                         # Compute the gradients
             optimizer.step()                        # Update the weights
@@ -134,53 +151,54 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
         avg_loss = total_loss / len(train_loader) # Compute the aberage loss over the epoch
 
-        wandb.log({f"Loss split {split}": avg_loss}) # Plot the loss on the website
+        wandb.log({f"Training Loss split {split}": avg_loss}) # Plot the loss on the website
         print(f"Epoch {epoch}/{epochs} - Loss: {avg_loss}")
 
-    loss_to_return = avg_loss # If one is only training, the function returns the training loss
+        loss_to_return = avg_loss # If one is only training, the function returns the training loss
 
-    ####################################################################################################################################################
-    # N'EST PAS A JOUR ################################################################################################################################
-    ####################################################################################################################################################
 
-    # Test the model on the testing dataset if asked
-    if testing == True:
-        # Evaluate the model on the testing dataset
-        print("Validating")
-        model_deter.eval()
-        model_diffusion.eval()
-        total_test_loss = 0
+        # Validate the model on the validating dataset if asked
+        if testing == True and epoch % 5 == 0:
+            # Evaluate the model on the validating dataset
+            print("Validating")
+            model_deter.eval()
+            model_diffusion.eval()
+            total_test_loss = 0
 
-        # To compute progress over testing
-        with torch.no_grad():
-            for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
+            # To compute progress over testing
+            with torch.no_grad():
+                for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
 
-                channel, target = channel.to(device), target.to(device)
-                for k in range(len(list_low_res)):
-                    list_low_res[k] = list_low_res[k].to(device)
+                    channel, target = channel.to(device), target.to(device)
+                    for k in range(len(list_low_res)):
+                        list_low_res[k] = list_low_res[k].to(device)
 
-                # Compute the output of the deterministic model
-                output_deter = model_deter(list_low_res, channel, apply_constraint = True)    
+                    # Compute the output of the deterministic model
+                    output_deter = model_deter(list_low_res, channel, apply_constraint = True)    
 
-                ### Compute the output of the diffusion model
-                A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
-                # Pass the input as the right format for the diffusion model
-                model_input, temporal_embed, t, noise = setup_input(device = device, 
-                                            scheduler = scheduler_diff, 
-                                            A_seq = A_seq, 
-                                            C = output_deter, 
-                                            B = target, 
-                                            temporal_encoder = temporal_encoder)
+                    ### Compute the output of the diffusion model
+                    A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
+                    # Pass the input as the right format for the diffusion model
+                    model_input, temporal_embed, t, noise = setup_input(device = device, 
+                                                scheduler = scheduler_diff, 
+                                                A_seq = A_seq, 
+                                                C = output_deter, 
+                                                B = target, 
+                                                temporal_encoder = temporal_encoder)
 
-                pred_noise = model_diffusion(model_input, temporal_embed, t)
+                    pred_noise = model_diffusion(model_input, temporal_embed, t)
 
-                test_loss = criterion(pred_noise, noise)      # Compute the loss (MSE over the noise)
+                    test_loss = criterion(pred_noise, noise)      # Compute the loss (MSE over the noise)
 
-                total_test_loss += test_loss.item()
+                    if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
+                        test_loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
 
-        avg_test_loss = total_test_loss / len(test_loader)
-        print(f"Validating Loss : {avg_test_loss}")
-        loss_to_return = avg_test_loss
+                    total_test_loss += test_loss.item()
+
+            avg_test_loss = total_test_loss / len(test_loader)
+            print(f"Validating Loss : {avg_test_loss}")
+            wandb.log({"Validating loss": avg_test_loss}) # Plot the loss on the website
+            loss_to_return = avg_test_loss
 
     return model_deter.state_dict(), model_diffusion.state_dict(), loss_to_return
 

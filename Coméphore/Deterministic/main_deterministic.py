@@ -30,12 +30,12 @@ if torch.cuda.is_available():
 
 
 # Super resolution factors
-temp_factor = 1
-spatial_factor = 10
-n_inputs = 1        # Frames to take into account as input, the last one is the image to downscale
+temp_factor = 3
+spatial_factor = 1
+n_inputs = 4        # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
-n_days_train = 2 # Only first n_days are used for each month
+n_days_train = 30 # Only first n_days are used for each month
 n_days_test = 2
 
 # Choose wether we want to train/test/both
@@ -43,12 +43,12 @@ training = True
 normalizing = False # If False, the code will import the last normalizer saved
 testing = True 
 
-cross_val = True # If we want to perform cross validation or simple training
+cross_val = False # If we want to perform cross validation or simple training
 
 # Training features
-batch_size = 100
-epochs = 1
-learning_rate = 5e-4
+batch_size = 48
+epochs = 5
+learning_rate = 1e-4
 
 # Data directories
 input_dir = f'/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/spatial_{spatial_factor}_temp_{temp_factor}'          # Low res frames
@@ -57,7 +57,7 @@ channel_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/in
 
 # Available models. One should choose a model and fill the corresponding parameters
 available_model = ["UNet_with_attention", "nearest_neighbor", "bicubic"]
-required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n_inputs", "attention strategy", "number of heads"),
+required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n_inputs", "attention strategy", "number of heads", "window size"),
                              "nearest_neighbor" : [None],
                              "bicubic" : [None]}
 
@@ -65,34 +65,29 @@ required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n
 available_strategy_mass = [None, "additive", ("multiplicative", "a function type that operates on tensors")] # The function should apply element wise for tensors
 def f_mass(x): # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and i thould not diverge when x is big
     return 1e-3 + x 
-treshold_constraint = 1 # Epoch where we should begin to apply conservative transformation
+treshold_constraint = 5 # Epoch where we should begin to apply conservative transformation
 
 # Attention parameters
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
-strat_attention = [None]
+strat_attention = ["time", "space"]
 
 nb_heads = 4        # Number of attention heads used during the MHA (both for time & space)
 if strat_attention == [None]:
     nb_heads = None
+window_size = 3     # window size for spatial attention
+if "space" not in strat_attention:
+    window_size = None
 
 # Choice of the model and parameters
 model = "UNet_with_attention" 
-model_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads)
+model_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads, window_size)
 
 
 
 # Loss function (used for training
-base_loss = nn.L1Loss       # Fill with nn.L1Loss or nn.MSELoss
-conservative = False        # If we add the conservative mass soft constraint
-lambda_conservative = 0.3
-autocorrel = False          # If we add the autocorrelation soft constraint
-lambda_autocorr = 0.3
+base_loss = nn.MSELoss       # Fill with nn.L1Loss or nn.MSELoss
 
-loss_function = CustomLossTrain(base_loss=base_loss(),
-                           lambda_conservative=lambda_conservative,
-                           conservative=conservative,                  
-                           covariance=autocorrel, 
-                           lambda_covariance=lambda_autocorr)
+loss_function = base_loss()
 
 name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE"}
 
@@ -117,7 +112,7 @@ strat_dem = "min_max"
 
 
 # Design the name of the run
-name_of_the_run = f"{name_loss[base_loss]}_input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_heads_{nb_heads}_delay_constraint_{treshold_constraint}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
+name_of_the_run = f"deter_alone_{name_loss[base_loss]}_input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_heads_{nb_heads}_delay_constraint_{treshold_constraint}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
 
 if model in ["bicubic", "nearest_neighbor"]: # If the model is not trainable
     name_of_the_run = f"loss_{name_loss[base_loss]}"
@@ -165,7 +160,7 @@ if training:
                                                                          model_parameters = model_parameters, treshold_constraint = treshold_constraint)
 
     # Save the best model & the associated normalization
-    tool.save_model(weights, name_of_the_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
+    tool.save_model_deter(weights, name_of_the_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
     if normalizing:
         tool.save_transfo(output_path = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/normalization", 
                  best_stats_precip = best_stats_precip, best_stats_dem = best_stats_dem, strat_dem = strat_dem, strat_precip = strat_precip)
@@ -189,7 +184,7 @@ if testing:
     print("Data loaded")
     # Normalize the test dataset, according to the training one
     print("Normalizing data")
-    best_transform = tool.load_best_transform(file = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/normalization",
+    best_transform = tool.load_best_transform(file = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/normalization",
                                          strat_dem=strat_dem, strat_precip=strat_precip)
     transform_precip, transform_dem = best_transform
     normalized_test_dataset = tool.TransformedDataset(base_dataset = test_dataset,

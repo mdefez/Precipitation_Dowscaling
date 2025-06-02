@@ -4,12 +4,13 @@
 # Import librairies
 import torch 
 from torch.utils.data import ConcatDataset
-from torch.optim.lr_scheduler import StepLR, CyclicLR
+from torch.optim.lr_scheduler import StepLR, CyclicLR, CosineAnnealingLR, LinearLR, SequentialLR
 from functools import partial
 import torch.nn as nn
 import time
 import pandas as pd
 import sys
+
 
 # Import functions from other files
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic')
@@ -36,22 +37,22 @@ if torch.cuda.is_available():
 # Super resolution factors
 temp_factor = 3
 spatial_factor = 1
-n_inputs = 3       # Frames to take into account as input, the last one is the image to downscale
+n_inputs = 4       # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
-n_days_train = 3 # Only first n_days are used for each month
-n_days_test = 2
+n_days_train = 30 # Only first n_days are used for each month
+n_days_test = 5
 
 # Choose wether we want to train/test/both
-training = False 
+training = True 
 normalizing = False # If False, the code will import the last normalizer saved
 testing = True 
 
 cross_val = False # If we want to perform cross validation or simple training
 
 # Training features
-batch_size = 64
-epochs = 10
+batch_size = 48
+epochs = 200
 learning_rate = 1e-4
 
 # Data directories
@@ -61,7 +62,8 @@ channel_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/in
 
 # Available models. One should choose a model and fill the corresponding parameters
 available_model_deter = ["UNet_with_attention", "nearest_neighbor", "bicubic"]
-required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n_inputs", "attention strategy", "number of heads", "window_size"),
+required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n_inputs", "attention strategy", "number of heads", "window_size", 
+                                                      "mse_deter", "dir weights deter"),
                              "nearest_neighbor" : [None],
                              "bicubic" : [None]}
 
@@ -70,7 +72,7 @@ required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n
 available_strategy_mass = [None, "additive", ("multiplicative", "a function type that operates on tensors")] # The function should apply element wise for tensors
 def f_mass(x): # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and i thould not diverge when x is big
     return 1e-3 + x 
-treshold_constraint_deter = 5 # Epoch where we should begin to apply conservative transformation for the deterministic model
+treshold_constraint_deter = 10 # Epoch where we should begin to apply conservative transformation for the deterministic model
 
 # Attention parameters
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
@@ -81,9 +83,19 @@ window_size = 3     # window size for spatial attention
 if "space" not in strat_attention:
     window_size = None
 
+# For the first n epochs, we add the MSE of the deterministic model (output VS target) in the loss function to force the deter to be decent
+lambda_mse = 1
+epoch_stop_mse_deter = -1 # Epoch where we should stop adding the MSE to the global loss function. Set to -1 if you don't want to use it
+mse_deter = (lambda_mse, epoch_stop_mse_deter)
+
+# Load pre train deterministic model
+# Fill with the path of the deterministic pre trained UNet one want to use, otherwise None
+dir_weights_deter = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/weights/spatial_1_temp_3/deter_alone_l2_input_4_n_days_30_attention_['time', 'space']_heads_4_delay_constraint_5_lr_0.0001_epochs_5_cross_val_False.pth" 
+
+
 # Choice of the model and parameters
 model_deter = "UNet_with_attention" 
-model_deter_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads, window_size)
+model_deter_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads, window_size, mse_deter, dir_weights_deter)
 
 ### Diffusion model ###
 nb_steps = 1000
@@ -107,10 +119,13 @@ df_metric = pd.DataFrame({"Name" : name_metric, "Metric" : metric_test})
 metric = LossTest(df_metric=df_metric)
 
 # All available scheduler strategies
+# Number of steps := number of batch that will be passed into the nn. 
+total_steps = epochs * (16 * len(RainSuperResDataset(input_dir, output_dir, channel_dir, 0, 0, train=True, n_days=n_days_train, n_inputs=n_inputs, temp_factor=temp_factor, spatial_factor=spatial_factor, delta=delta))) / batch_size   
 dict_scheduler = {"Step decay" : ("Step decay", "epoch", partial(StepLR, step_size= 10, gamma=0.2)), # Every step_size epoch, multiply the learning rate by gamma
-                  "Cyclical" : ("Cyclical", "batch", partial(CyclicLR, base_lr=learning_rate, max_lr=learning_rate * 10, step_size_up=100, mode='triangular2'))} # The lr goes from min to max in a step_size period. After each cycle, the max value is divided by 2
+                  "Cyclical" : ("Cyclical", "batch", partial(CyclicLR, base_lr=learning_rate, max_lr=learning_rate * 10, step_size_up=100, mode='triangular2')), # The lr goes from min to max in a step_size period. After each cycle, the max value is divided by 2
+                    "cosinus decrease" : ("cosinus decrease", "batch", partial(CosineAnnealingLR, T_max=total_steps))} # Cosinus that decreases to 0 in T_max steps 
+scheduler = dict_scheduler["cosinus decrease"] # Choose the strategy here
 
-scheduler = dict_scheduler["Cyclical"] # Choose the strategy here
 
 # Normalization strategies
 dict_strategies = ["Standard", "min_max", "Robust"]
@@ -133,6 +148,7 @@ if model_deter in ["bicubic", "nearest_neighbor"]: # If the model is not trainab
 assert not ("time" in strat_attention and n_inputs == 1), "You want to compute temporal attention with a 1-input sequence"
 assert not ("time" not in strat_attention and n_inputs != 1), "You want multiple inputs without computing temporal attention"
 assert epochs >= treshold_constraint_deter, "The treshold for the mass conservation constraint is set after the number of epochs"
+assert epochs >= epoch_stop_mse_deter, "The treshold for stopping the deterministic MSE in the loss function is set after the number of epochs"
 assert model_deter in available_model_deter, "Model not part of available model"
 assert strat_attention in list_strat_attention , "Attention strategies not in the list of available attention strategies"
 assert len(model_deter_parameters) == len(required_model_parameters[model_deter]), "Wrong number of model parameters filled"

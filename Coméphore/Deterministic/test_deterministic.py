@@ -193,7 +193,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
             for k in range(len(list_low_res)):
                 list_low_res[k] = list_low_res[k].to(device)
 
-            output = model(list_low_res, channel)     # Compute the output
+            output = model(list_low_res, channel, apply_constraint = True)     # Compute the output
 
             test_loss = criterion(output, target) # Compute the average loss for each of the specified metric
             loss_vector = criterion.forward_vecteur(output, target) # Compute the marginal loss only for the main metric

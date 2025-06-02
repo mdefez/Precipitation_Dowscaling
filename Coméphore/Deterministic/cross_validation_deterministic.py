@@ -16,7 +16,7 @@ def main(train_dataset, val_dataset, normalizing, strat_precip, strat_dem,
     if normalizing: # Compute the normalizer
         (transform_precip, transform_dem), (stats_precip, stats_dem) = tool.compute_transformation(train_dataset=train_dataset, strat_precip = strat_precip, strat_channel = strat_dem)
     else: # Load the normalizer
-        best_transform = tool.load_best_transform(file = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/UNet/normalization",
+        best_transform = tool.load_best_transform(file = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/normalization",
                                         strat_dem=strat_dem, strat_precip=strat_precip)
         stats_precip, stats_dem = None, None
         transform_precip, transform_dem = best_transform
