@@ -31,28 +31,28 @@ def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps, la
 
         # Prédiction du bruit avec le modèle
         model_input, temporal_embed = setup_input_inference(device, R_t, A_seq, C, temporal_encoder)
-        pred_epsilon = model(model_input, temporal_embed, t)  # (B, C, H, W)
+        pred_velo = model(model_input, temporal_embed, t)  # (B, C, H, W)
 
-        # Scheduler params
-        alpha_bars = scheduler.alpha_bars.to(device)
-        alpha_bar_t = alpha_bars[t].view(-1, 1, 1, 1).to(device)
-        alpha_bar_prev = alpha_bars[torch.clamp(t-1, 0)].view(-1, 1, 1, 1).to(device)
 
-        beta_t = 1 - alpha_bar_t / alpha_bar_prev
-        beta_t = torch.clamp(beta_t, 0.0001, 0.9999)  # sécurité numérique
+        # Compute epsilon directly from predicted velocity and R_t
+        epsilon_pred = torch.sqrt(alpha_bar_t) * pred_velo + torch.sqrt(1 - alpha_bar_t) * R_t
+        
+        alpha_t = scheduler.alphas[t].to(device)
+        alpha_bar_t = scheduler.alpha_bars[t].to(device)
+        beta_t = scheduler.betas[t].to(device)
 
-        # Posterior mean estimate for R_{t-1}
+        # Calculate posterior mean mu_t
+        coef1 = 1 / torch.sqrt(alpha_t)
+        coef2 = (1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)
+        mu_t = coef1 * (R_t - coef2 * epsilon_pred)
+        
+        if t > 1:   # Noise again to keep the probabilistic approach
+            sigma_t = torch.sqrt(beta_t)
+            noise = torch.randn_like(R_t)
+            R_t = mu_t + sigma_t * noise
+        else:       # Don't noise because it's the final step
+            R_t = mu_t
 
-        coef1 = (1 / torch.sqrt(alpha_bar_t))
-        coef2 = (1 - alpha_bar_t).sqrt()
-        R_0_est = (R_t - coef2 * pred_epsilon) / coef1
-
-        # Noise again to compute R_{t-1} (probabilistic approach)
-        noise = torch.randn_like(R_t) if t_step > 0 else 0
-        R_t = (
-            torch.sqrt(alpha_bar_prev) * R_0_est +
-            torch.sqrt(1 - alpha_bar_prev) * noise
-        )
 
     # Given the residual, we can compute the true output
     B_pred = C + R_t

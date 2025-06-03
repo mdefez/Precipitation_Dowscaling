@@ -1,7 +1,7 @@
 # The goal of this file is to design a train function
 # It takes as input a training dataset and it trains the model on it 
 # It returns the weights and the loss
-# It eventually saves the weights if asked
+# It returns the weights corresponding to the best model (on the validating set)
 
 import torch
 import torch.optim as optim
@@ -94,6 +94,10 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         warmup_scheduler = LinearLR(optimizer = optimizer, start_factor=1e-8 / learning_rate, end_factor=1.0, total_iters=warmup_steps)  # Start with a warm up (increase linearly from 0 to lr)
         scheduler = SequentialLR(optimizer = optimizer, schedulers=[warmup_scheduler, scheduler], milestones=[warmup_steps])  # switch schedulers at warmup_steps
 
+    best_loss = 1e10    # To save the best performing model. We don't save the last one but the one that minimizes the validation loss
+    best_weights_deter = None 
+    best_weights_diffusion = None
+
     # Training
     print("Training")
     for epoch in range(1, epochs + 1):
@@ -120,16 +124,16 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             ### Compute the output of the diffusion model
             A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
             # Pass the input as the right format for the diffusion model
-            model_input, temporal_embed, t, noise = setup_input(device = device, 
+            model_input, temporal_embed, t, true_velo = setup_input(device = device, 
                                           scheduler = scheduler_diff, 
                                           A_seq = A_seq, 
                                           C = output_deter, 
                                           B = target, 
                                           temporal_encoder = temporal_encoder)
 
-            pred_noise = model_diffusion(model_input, temporal_embed, t)
+            pred_velo = model_diffusion(model_input, temporal_embed, t)
 
-            loss = criterion(pred_noise, noise)      # Compute the loss (MSE over the noise)
+            loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the velocity)
 
             if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
                 loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
@@ -137,8 +141,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             optimizer.zero_grad()                   # Set the gradients to 0                
             loss.backward()                         # Compute the gradients
             optimizer.step()                        # Update the weights
-
-
 
             total_loss += loss.item()
 
@@ -153,8 +155,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
         wandb.log({f"Training Loss split {split}": avg_loss}) # Plot the loss on the website
         print(f"Epoch {epoch}/{epochs} - Loss: {avg_loss}")
-
-        loss_to_return = avg_loss # If one is only training, the function returns the training loss
 
 
         # Validate the model on the validating dataset if asked
@@ -179,16 +179,16 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                     ### Compute the output of the diffusion model
                     A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
                     # Pass the input as the right format for the diffusion model
-                    model_input, temporal_embed, t, noise = setup_input(device = device, 
+                    model_input, temporal_embed, t, true_velo = setup_input(device = device, 
                                                 scheduler = scheduler_diff, 
                                                 A_seq = A_seq, 
                                                 C = output_deter, 
                                                 B = target, 
                                                 temporal_encoder = temporal_encoder)
 
-                    pred_noise = model_diffusion(model_input, temporal_embed, t)
+                    pred_velo = model_diffusion(model_input, temporal_embed, t)
 
-                    test_loss = criterion(pred_noise, noise)      # Compute the loss (MSE over the noise)
+                    test_loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the noise)
 
                     if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
                         test_loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
@@ -196,11 +196,27 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                     total_test_loss += test_loss.item()
 
             avg_test_loss = total_test_loss / len(test_loader)
+    
+            # Update weights if best model
+            if avg_test_loss <= best_loss:
+                best_weights_deter = model_deter.state_dict()
+                best_weights_diffusion = model_diffusion.state_dict()
+
+                best_loss = avg_test_loss
+                patience_counter = 0
+            else: # Keep in mind the lack of improvement
+                patience_counter += 1
+
+            # Early stop if no significant improve for too long (5 testing epochs, so 25 real epochs)
+            patience_treshold = 7       # Set to None if one doesn't want any early stopping
+            if patience_treshold != None and patience_counter >= patience_treshold:
+                return best_weights_deter, best_weights_diffusion, best_loss
+
+
             print(f"Validating Loss : {avg_test_loss}")
             wandb.log({"Validating loss": avg_test_loss}) # Plot the loss on the website
-            loss_to_return = avg_test_loss
 
-    return model_deter.state_dict(), model_diffusion.state_dict(), loss_to_return
+    return best_weights_deter, best_weights_diffusion, best_loss
 
 
 

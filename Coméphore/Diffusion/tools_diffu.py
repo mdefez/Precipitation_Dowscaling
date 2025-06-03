@@ -27,7 +27,13 @@ def setup_input(device, scheduler, A_seq, C, B, temporal_encoder): # Set up inpu
     A_T = A_seq[:, -1]                                # (B, C, H, W)
     model_input = torch.cat([R_t, A_T, C], dim=1)     # (B, C_B + C_A + C_C = 2*temp_factor + 2, H, W)
 
-    return model_input, temporal_embed, t, noise
+    # calcul de la vélocité
+    sqrt_alpha_bar = torch.sqrt(scheduler.alpha_bars[t]).view(-1, 1, 1, 1)
+    sqrt_one_minus_alpha_bar = torch.sqrt(1 - scheduler.alpha_bars[t]).view(-1, 1, 1, 1)
+
+    velocity = sqrt_alpha_bar * noise - sqrt_one_minus_alpha_bar * R
+
+    return model_input, temporal_embed, t, velocity
 
 def setup_input_inference(device, R_t, A_seq, C, temporal_encoder): # Set up input/output for the diffusion model for the inference step
     A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1, precip 
