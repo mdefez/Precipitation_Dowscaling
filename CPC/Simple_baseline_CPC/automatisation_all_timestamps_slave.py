@@ -102,7 +102,7 @@ def main(cpc_file, ds):
             max_y, max_x = max_idx  # attention à l'ordre : (row, column)
             max_lat, max_lon = lat[max_y], lon[max_x]
 
-            # Ajouter une étoile rouge
+            # Ajouter une étoile 
             ax.plot(max_lon, max_lat, marker='*', color='black', markersize=16, label = "Maximum value", linestyle = "None")
             ax.legend(loc = "upper right")
 

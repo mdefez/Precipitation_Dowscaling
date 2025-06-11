@@ -1,9 +1,10 @@
 # The goal of this script is to develop a dataset class to feed the dataloader
 # Each dataset is defined for a specific tile
 # The class should have a __getitem__ method that return an input & target to the model : 
-#   - n following low res frames on the same tile, where n can be chosen
+#   - a list of n following low res frames on the same tile, where n can be chosen
 #   - the tile's DEM 
-#   - the 6 targets corresponding to the last low res frame
+#   - the temp_factor targets corresponding to the last low res frame
+#   - the list of time indexes with usual format YYYYMMDDHH24
 
 import os
 import numpy as np
@@ -52,8 +53,8 @@ class RainSuperResDataset(Dataset):
                     t_next = input_times[i + k]
                     following_frames.append(t_next)
 
-                for t in following_frames:  # Some exceptions should be handled + we should not overlap on the next day
-                    if (t % 10 == 1 and self.temp_factor == 6) or ((t%100) + self.temp_factor >= 24):
+                for t in following_frames:  # Some exceptions should be handled + every frame within the same sample should have the same month
+                    if (t % 10 == 1 and self.temp_factor == 6) or (str(t)[5:7] != str(t0)[5:7]):
                         add_the_sample = False
                 
                 
@@ -72,7 +73,17 @@ class RainSuperResDataset(Dataset):
         return f"beggining_{timestep}_temp_factor_{self.temp_factor}_spatial_factor_{self.spatial_factor}.npy"
     
     def target_format(self, timestep): # Return the correct output filename corresponding to the timestep
-        return f"{timestep}.npy"
+        # One should take into account that a day is 24 hours, so if the houn is greater than 24, we should map it to the next day
+        if timestep%100 >= 24:
+            timestep = str(timestep)
+            day = timestep[:-2]
+            hour = timestep[-2:]
+            new_timestep = 100 * (int(day) + 1) + (int(hour) - 24)
+
+        else:
+            new_timestep = timestep
+
+        return f"{new_timestep}.npy"
     
     def dem_name(self, domain): # Return the correct dem filename corresponding to the domain
         hor = domain[9]

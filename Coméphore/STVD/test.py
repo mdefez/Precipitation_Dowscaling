@@ -20,7 +20,7 @@ from inference import sample_diffusion
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Function to plot a DEM/Precipitation image
-def plot_img(image, is_precip, nb_slot, position, title, delta = False, nb_column = 3):
+def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = False):
     plt.subplot(nb_slot, nb_column, position)
     plt.subplots_adjust(hspace=0.4) 
     plt.subplots_adjust(wspace=0.5) 
@@ -30,7 +30,7 @@ def plot_img(image, is_precip, nb_slot, position, title, delta = False, nb_colum
     custom_cmap = mcolors.LinearSegmentedColormap.from_list('blue_white_red', colors)
 
     if is_precip:
-        vmin, vmax = 0, 0.1
+        vmin, vmax = 0, 1
         if delta == True:
             vmin, vmax = -0.1, 0.1
         plt.imshow(image, cmap=custom_cmap, vmin = vmin, vmax = vmax)
@@ -47,7 +47,11 @@ def plot_img(image, is_precip, nb_slot, position, title, delta = False, nb_colum
             spine.set_linewidth(0.5)
             spine.set_visible(True)
 
-
+        # Add a star at the max location if there are some precipitation
+        if image.max() > 0:
+            max_idx = np.unravel_index(np.argmax(image), image.shape)
+            max_y, max_x = max_idx  # row = y, column = x
+            plt.plot(max_x, max_y, marker='*', color='black', markersize=12, label='Max', linestyle = "None")
 
     else: # dem
         plt.imshow(image, cmap='terrain', vmin = 0, vmax = 1)
@@ -55,18 +59,24 @@ def plot_img(image, is_precip, nb_slot, position, title, delta = False, nb_colum
         plt.axis("off")
 
     plt.title(title)
+    
 
 # Function to plot all the relevant images and save them
-def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, targets, output_dir, delta, bot_or_top = None, best_worst = False):
+def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, targets, output_dir, delta, multiple_scenarios,
+                bot_or_top = None, best_worst = False):
 
     os.makedirs(output_dir, exist_ok=True)
     for folder in ["Random", "Lowest", "Best"]:
         os.makedirs(os.path.join(output_dir, folder), exist_ok=True)
     
     # We save n examples per epoch
-    for i in range(min(15, len(predictions_final))): 
-
-        pred_img = predictions_final[i].cpu().detach().numpy()               # Final Predictions
+    for i in range(min(15, len(prediction_deter))): 
+        if multiple_scenarios == True:
+            pred_img = []
+            for k in range(len(predictions_final)):
+                pred_img.append(predictions_final[k][i].cpu().detach().numpy())               # Final Predictions
+        else:
+            pred_img = [predictions_final[i].cpu().detach().numpy()]               # Final Predictions
         pred_img_deter = prediction_deter[i].cpu().detach().numpy()               # Output (prediction) of the deterministic UNet
         target_img = targets[i].cpu().detach().numpy()                 # Targets
         if best_worst == False: # If we plot samples from a batch
@@ -78,18 +88,23 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         dem_plot = dem[i].cpu().detach().numpy().squeeze()           # DEM
 
         # Useful to organize the plot
-        num_channels = pred_img.shape[0]
+        num_scenarios = len(pred_img)
+
+        num_channels = pred_img[0].shape[0]
+
+        # Number of horizontal slots
+        nb_columns = 1 + num_scenarios + 1      # Pred deter + n scenarios + target
 
         # Number of vertical slots
-        nb_slots = num_channels + 1 + (len(list_input_plot))// 3     # DEM + input + temp_factor (given that we have 3 columns)      
+        nb_slots = num_channels + 1 + (len(list_input_plot))// nb_columns     # DEM + input + temp_factor (given that we have 3 columns)      
 
-        plt.figure(figsize=(12, 5 * num_channels))
+        plt.figure(figsize=(12 + 4 * nb_columns, 5 * num_channels))
 
         # Plot DEM & inputs
-        plot_img(dem_plot, False, nb_slots, 1, "DEM")
+        plot_img(dem_plot, False, nb_slots, 1, "DEM", nb_column=nb_columns)
 
         for k in range(len(list_input_plot)):
-            plot_img(list_input_plot[k], True, nb_slots, 2+k, f"Frame {k} (Timestep {list_time[k]})")
+            plot_img(list_input_plot[k], True, nb_slots, 2+k, f"Frame {k} (Timestep {list_time[k]})", nb_column=nb_columns)
 
         # Loop over the n timesteps
         for c in range(num_channels):
@@ -98,13 +113,17 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
                 new_scale = True
 
             # Prediction of the deterministic model
-            plot_img(pred_img_deter[c], True, nb_slots, 3*((len(list_input_plot))//3) + 3*(c+1) + 1, f"Prediction (deterministic) - Timestep {c+1}", delta=new_scale)
+            plot_img(pred_img_deter[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + 1, 
+                     f"Prediction (deterministic) - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
 
-            # Final Prediction
-            plot_img(pred_img[c], True, nb_slots, 3*((len(list_input_plot))//3) + 3*(c+1) + 2, f"Final prediction - Timestep {c+1}", delta=new_scale)
+            for k in range(num_scenarios):
+                # Plot a scenario
+                plot_img(pred_img[k][c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + 2 + k, 
+                        f"Final prediction - Timestep {c+1} - Scenario {k+1}", delta=new_scale, nb_column=nb_columns)
 
             # Target
-            plot_img(target_img[c], True, nb_slots, 3*((len(list_input_plot))//3) + 3*(c+1) + 3, f"Target - Timestep {c+1}", delta=new_scale)
+            plot_img(target_img[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + 2 + num_scenarios, 
+                     f"Target - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
 
         # Save the plot
         # Design the name of the file
@@ -126,7 +145,7 @@ def load_model(model, filepath):
     return model
 
 
-def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
+def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios,
          criterion, batch_size, asked_model, model_parameters, delta, n_inputs, model_parameters_diffusion):
     
     output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
@@ -160,7 +179,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
     model_diffu = load_model(model_diffu, filepath_diffu)  # Load the weights
     model_diffu.to(device)
 
-    scheduler = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1])
+    scheduler = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1], type = beta[2])
     temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_inputs).to(device).eval()
 
     # Loading the test dataset
@@ -209,10 +228,11 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
     best_worst_to_plot = 10 # Number of best / worst sample to plot
 
     with torch.no_grad():
-        stop = 0
+        stop = 10
+        count = 0
         for list_low_res, channel, target, time_idx in test_loader:
-            stop += 1
-            if stop == 10:
+            count += 1
+            if count == stop:
                 break
             channel, target = channel.to(device), target.to(device)
             for k in range(len(list_low_res)):
@@ -224,12 +244,14 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
             # Compute the output of the diffusion model
             A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
 
-            B_pred = sample_diffusion(model_diffu, scheduler, A_seq, C = output_deter, temporal_encoder = temporal_encoder, 
+            # The output is a list of n "real" outputs. It corresponds to n different scenarios
+            # We only compute the n scenarios to plot them. After the first batch, we set n to 1. 
+            B_pred = sample_diffusion(model_diffu, scheduler, A_seq, C = output_deter, temporal_encoder = temporal_encoder, n_scenarios = n_scenarios,
                                       num_steps=nb_steps, last_frame = list_low_res[-1], conservative_mass_diffusion = conservative_mass_diffusion) 
 
-
-            test_loss = criterion(B_pred, target) # Compute the average loss for each of the specified metric
-            loss_vector = criterion.forward_vecteur(B_pred, target) # Compute the marginal loss only for the main metric
+            # We compute the loss for a random scenario (the first for example)
+            test_loss = criterion(B_pred[0], target) # Compute the average loss for each of the specified metric
+            loss_vector = criterion.forward_vecteur(B_pred[0], target) # Compute the marginal loss only for the main metric
 
             try:    # If it exists, add the loss to the total loss
                 total_test_loss += test_loss
@@ -238,8 +260,9 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
 
             # Plot some random predictions (from the deterministic only AND for the whole model) for the first batch
             if plot_first_samples == True:
-                save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, delta = delta)
+                save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, delta = delta, multiple_scenarios = True)
                 plot_first_samples = False
+                n_scenarios = 1
 
             # Update if it is a good/bad sample
             # Fill the list with the first 5 values
@@ -247,17 +270,22 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
                 # Worst loss
                 for idx in range(best_worst_to_plot - len(worst_loss)): # Fill it until it reaches the right length
                     worst_loss.append(loss_vector[idx].item()) # add the marginal loss
-                    worst_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
+                    worst_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[0][idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
 
                 worst_loss, worst_sample = sort_l1_l2(worst_loss, worst_sample) # Both list are sorted ascendingly 
 
                 min_loss_of_the_worst = worst_loss[0]
 
+
+            threshold_best = 0.01
             if len(best_loss) < best_worst_to_plot:
                 # Best loss
-                for idx in range(best_worst_to_plot - len(best_loss)): # Fill it until it reaches the right length
-                    best_loss.append(loss_vector[idx].item()) # add the marginal loss
-                    best_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
+                idx = 0
+                while len(best_loss) < best_worst_to_plot: # Fill it until it reaches the right length
+                    if get_sample(list_low_res, idx)[-1].mean() > threshold_best:   # Fill it with valid (non null) candidates
+                        best_loss.append(loss_vector[idx].item()) # add the marginal loss
+                        best_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[0][idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
+                    idx += 1
 
                 best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
 
@@ -273,20 +301,24 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
                     marginal_loss = loss_vector[k].item()
                     if marginal_loss > min_loss_of_the_worst:
                         worst_loss[0] = marginal_loss
-                        worst_sample[0] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[k], output_deter[k], channel[k], target[k]]
+                        worst_sample[0] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[0][k], output_deter[k], channel[k], target[k]]
 
                         # Sort both list again & compute the new min of the highest
                         worst_loss, worst_sample = sort_l1_l2(worst_loss, worst_sample) # Both list are sorted ascendingly 
 
                         min_loss_of_the_worst = worst_loss[0]
 
-                    if marginal_loss < max_loss_of_the_best:
-                        best_loss[-1] = marginal_loss
-                        best_sample[-1] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[k], output_deter[k], channel[k], target[k]]
-                        # Sort both list again & compute the new min of the highest
-                        best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
+                    last_frame = get_sample(list_low_res, k)[-1]
+                    if last_frame.mean() > threshold_best: # For "best" plots, we only consider those with at least some precipitation
+                        if marginal_loss < max_loss_of_the_best:
+                            best_loss[-1] = marginal_loss
+                            best_sample[-1] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[0][k], output_deter[k], channel[k], target[k]]
+                            # Sort both list again & compute the new min of the highest
+                            best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
 
-                        max_loss_of_the_best = best_loss[-1]
+                            max_loss_of_the_best = best_loss[-1]
+
+
 
 
             
@@ -296,9 +328,9 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run,
         return [x[col] for x in worst_sample]
 
     save_images(get_column(worst_sample, 0), get_column(worst_sample, 1), get_column(worst_sample, 2), get_column(worst_sample, 3), get_column(worst_sample, 4),
-                get_column(worst_sample, 5), bot_or_top="bot", output_dir=output_dir_images, best_worst=True, delta = delta)
+                get_column(worst_sample, 5), bot_or_top="bot", output_dir=output_dir_images, best_worst=True, delta = delta, multiple_scenarios = False)
     save_images(get_column(best_sample, 0), get_column(best_sample, 1), get_column(best_sample, 2), get_column(best_sample, 3), get_column(best_sample, 4),
-                get_column(best_sample, 5), bot_or_top="top", output_dir=output_dir_images, best_worst=True, delta = delta)
+                get_column(best_sample, 5), bot_or_top="top", output_dir=output_dir_images, best_worst=True, delta = delta, multiple_scenarios = False)
 
     avg_test_loss = total_test_loss / len(test_loader)
     print(f"Test Loss: {avg_test_loss} for the following metrics \n{criterion.name_metric}")

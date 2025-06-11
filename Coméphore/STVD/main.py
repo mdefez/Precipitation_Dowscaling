@@ -4,7 +4,7 @@
 # Import librairies
 import torch 
 from torch.utils.data import ConcatDataset
-from torch.optim.lr_scheduler import StepLR, CyclicLR, CosineAnnealingLR, LinearLR, SequentialLR
+from torch.optim.lr_scheduler import StepLR, CyclicLR, CosineAnnealingLR
 from functools import partial
 import torch.nn as nn
 import time
@@ -40,11 +40,13 @@ spatial_factor = 1
 n_inputs = 4       # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
+n_scenarios = 3     # Number of scenarios to compute
+
 n_days_train = 2 # Only first n_days are used for each month
 n_days_test = 5
 
 # Choose wether we want to train/test/both
-training = True 
+training = False 
 normalizing = False # If False, the code will import the last normalizer saved
 testing = True 
 
@@ -99,7 +101,7 @@ model_deter_parameters = (("multiplicative", f_mass), n_inputs, strat_attention,
 
 ### Diffusion model ###
 nb_steps = 1000
-beta = (1e-4, 0.02)
+beta = (1e-4, 0.02, "linear")       # beta_start, beta_end, linear/quadratic
 
 conservative_mass_diffusion = ("multiplicative", f_mass)
 
@@ -107,7 +109,7 @@ model_parameters_diffusion = (nb_steps, beta, conservative_mass_diffusion)
 
 
 # Loss function (used for training)
-base_loss = nn.MSELoss       # Loss function on the predicted/true noise
+base_loss = nn.MSELoss       # Loss function over velocity or noise
 
 name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE"}
 
@@ -150,6 +152,7 @@ assert not ("time" not in strat_attention and n_inputs != 1), "You want multiple
 assert epochs >= treshold_constraint_deter, "The treshold for the mass conservation constraint is set after the number of epochs"
 assert epochs >= epoch_stop_mse_deter, "The treshold for stopping the deterministic MSE in the loss function is set after the number of epochs"
 assert model_deter in available_model_deter, "Model not part of available model"
+assert n_days_train <= 28, "n_days_train sould be lower than 28 (because of february)"
 assert strat_attention in list_strat_attention , "Attention strategies not in the list of available attention strategies"
 assert len(model_deter_parameters) == len(required_model_parameters[model_deter]), "Wrong number of model parameters filled"
 assert not (n_days_test == 1 or n_days_train == 1), "Training or Testing set is empty, don't set n_days to 1"
@@ -221,7 +224,7 @@ if testing:
 
     test(test_dataset=normalized_test_dataset, spatial_factor=spatial_factor, temp_factor=temp_factor, name_of_the_run=name_of_the_run,
          criterion=metric, batch_size=batch_size, asked_model=model_deter, model_parameters=model_deter_parameters, delta = delta, n_inputs = n_inputs,
-         model_parameters_diffusion = model_parameters_diffusion)
+         model_parameters_diffusion = model_parameters_diffusion, n_scenarios=n_scenarios)
 
 
 end_time_testing = time.time()

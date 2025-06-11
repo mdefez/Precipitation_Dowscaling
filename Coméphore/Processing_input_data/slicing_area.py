@@ -93,18 +93,24 @@ def timestep_of_interest_target(year, n_days = 28):
     for month in range(1, 13):
         month = str(month).zfill(2)
 
-        for day in range(15, n_days + 1):
+        for day in range(1, n_days + 1):
             day = str(day).zfill(2)
 
             for hour in range(24):
-                if day == "01" and hour == 0:
-                    continue
                 hour = str(hour).zfill(2)
 
                 file_to_add = f'{year}{month}{day}{hour}'
+
+                if file_to_add.endswith("0100"): # The first hour of each month is not stored in the index month's folder but in the previous one. We just ditch it
+                    continue
                 list_files.append(file_to_add)
 
     return list_files
+
+# Here we remove the outliers, all values above the 99.5% quantile of the Bernoulli-Gamma law will be set at this value
+def remove_outliers(npy, max_995):
+    npy[npy >= max_995] = max_995 
+    return npy
 
 # Save the target for 2023 & 2024
 def save_target_data(output_folder, year): # Usually output = "../../../downscaling/mdefez/Comephore/RNB/target_data"
@@ -117,6 +123,7 @@ def save_target_data(output_folder, year): # Usually output = "../../../downscal
             print(hor, vert)
             for timestep in list_timestep:
                 tile = get_a_tile(hor, vert , timestep)
+                tile = remove_outliers(tile, 55)
 
                 np.save(f"{output_folder}/{year}/tile_hor_{hor}_vert_{vert}/{timestep}.npy", tile)
 

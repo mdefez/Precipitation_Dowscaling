@@ -3,7 +3,7 @@ import slicing_area as slice
 spatial_factor = 10
 temp_factor = 1
 
-download_target = True # If we also want to download the target data
+download_target = False # If we also want to download the target data
 
 for year in [2023, 2024]:
     if download_target == True:

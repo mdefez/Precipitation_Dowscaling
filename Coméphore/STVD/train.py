@@ -81,7 +81,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                                        temp_factor = temp_factor, spatial_factor = spatial_factor).to(device)
 
     temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_input).to(device).train()
-    scheduler_diff = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1])
+    scheduler_diff = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1], type = beta[2])
 
     # Define the loss function & optimizer
     criterion = loss_function
@@ -158,7 +158,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
 
         # Validate the model on the validating dataset if asked
-        if testing == True and epoch % 5 == 0:
+        if testing == True and epoch % 3 == 0:
             # Evaluate the model on the validating dataset
             print("Validating")
             model_deter.eval()
@@ -207,8 +207,8 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             else: # Keep in mind the lack of improvement
                 patience_counter += 1
 
-            # Early stop if no significant improve for too long (5 testing epochs, so 25 real epochs)
-            patience_treshold = 7       # Set to None if one doesn't want any early stopping
+            # Early stop if no significant improve for too long (n testing epochs, so 3*n real epochs)
+            patience_treshold = None       # Set to None if one doesn't want any early stopping
             if patience_treshold != None and patience_counter >= patience_treshold:
                 return best_weights_deter, best_weights_diffusion, best_loss
 

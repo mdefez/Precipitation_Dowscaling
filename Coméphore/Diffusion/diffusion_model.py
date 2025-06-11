@@ -4,9 +4,16 @@ import torch.nn.functional as F
 import numpy as np
 
 class DiffusionScheduler:
-    def __init__(self, timesteps, beta_start=1e-4, beta_end=0.02):
+    def __init__(self, timesteps, type, beta_start=1e-4, beta_end=0.02):
         self.timesteps = timesteps
-        self.betas = torch.linspace(beta_start, beta_end, timesteps)
+        if type == "linear":
+            self.betas = torch.linspace(beta_start, beta_end, timesteps)
+        if type == "quadratic":
+            sqrt_beta_start = beta_start ** 0.5
+            sqrt_beta_end = beta_end ** 0.5
+            
+            sqrt_betas = torch.linspace(sqrt_beta_start, sqrt_beta_end, timesteps)
+            self.betas = sqrt_betas ** 2
         self.alphas = 1.0 - self.betas
         self.alpha_bars = torch.cumprod(self.alphas, dim=0)
 

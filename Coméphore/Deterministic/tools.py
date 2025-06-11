@@ -33,7 +33,7 @@ def compute_stats(train_dataset, strat_precip, strat_channel):
     all_data_precip = []
     all_data_channel = []
 
-    for precip, channel, target in train_loader:
+    for precip, channel, target, time_idx in train_loader:
         # precip: List of (B, 1, 1, H, W)
 
         for frame in precip: # Add each batch of the list to the total amount of data
