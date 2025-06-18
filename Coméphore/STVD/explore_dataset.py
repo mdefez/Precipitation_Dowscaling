@@ -84,6 +84,5 @@ def fit_gamma():
     plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Data_analysis/gamma_fit.png")
 
 get_data(2023)
-fit_gamma()
 
 # Side note : The 99.5% quantile s'élève à 55mm/h ce qui est cohérent pour la RNB. Toutes les valeurs supérieures seront ramenées à ce "maximum"

@@ -17,6 +17,7 @@ from torch.optim.lr_scheduler import LinearLR, SequentialLR
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic')
 from UNet_attention import UNet_with_attention 
 from baseline import nearest_neighbor, bicubic
+import tools as tool
 
 # Import diffusion model
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
@@ -201,6 +202,10 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             if avg_test_loss <= best_loss:
                 best_weights_deter = model_deter.state_dict()
                 best_weights_diffusion = model_diffusion.state_dict()
+
+                # Save the ongoing best model 
+                tool.save_model_deter(best_weights_deter, name_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
+                tool.save_model_diffu(best_weights_diffusion, name_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
 
                 best_loss = avg_test_loss
                 patience_counter = 0

@@ -13,8 +13,9 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from baseline import nearest_neighbor, bicubic
+from matplotlib.colors import LinearSegmentedColormap
+import seaborn as sns
 import numpy as np
-from tqdm import tqdm
 from inference import sample_diffusion
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,7 +30,7 @@ def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = Fals
     colors = ['white', 'blue', 'yellow']
     custom_cmap = mcolors.LinearSegmentedColormap.from_list('blue_white_red', colors)
 
-    if is_precip:
+    if is_precip == True:
         vmin, vmax = 0, 1
         if delta == True:
             vmin, vmax = -0.1, 0.1
@@ -53,12 +54,47 @@ def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = Fals
             max_y, max_x = max_idx  # row = y, column = x
             plt.plot(max_x, max_y, marker='*', color='black', markersize=12, label='Max', linestyle = "None")
 
-    else: # dem
+    if is_precip == "DEM": # dem
         plt.imshow(image, cmap='terrain', vmin = 0, vmax = 1)
         plt.colorbar(label = "Elevation")
         plt.axis("off")
 
+    if is_precip == "variance": # variance of the scenarios
+        custom_cmap = LinearSegmentedColormap.from_list("white_to_red", ["white", "red"])
+
+        plt.imshow(image, cmap=custom_cmap, vmin = 0, vmax = 1)
+        plt.colorbar(label = "Standard deviation (mm/h)")
+        # Remove axis and plot a dark square along the plot
+        ax = plt.gca()
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        for spine in ax.spines.values():
+            spine.set_edgecolor('black')
+            spine.set_linewidth(0.5)
+            spine.set_visible(True)
+
     plt.title(title)
+
+def plot_histo(pred, target, title, nb_slot, nb_column, position):
+    if target.max() == 0:
+        return None
+    
+    plt.subplot(nb_slot, nb_column, position)
+    plt.subplots_adjust(hspace=0.4) 
+    plt.subplots_adjust(wspace=0.5) 
+
+    flat_pred = pred.flatten()
+    flat_target = target.flatten()
+
+    sns.kdeplot(flat_pred, color='steelblue', label='Prediction', clip=(0, 1), warn_singular=False)
+    sns.kdeplot(flat_target, color='orange', label='Target', clip=(0, 1), warn_singular=False)
+    plt.title(title)
+    plt.xlabel("Precipitation")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.show()
     
 
 # Function to plot all the relevant images and save them
@@ -93,7 +129,7 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         num_channels = pred_img[0].shape[0]
 
         # Number of horizontal slots
-        nb_columns = 1 + num_scenarios + 1      # Pred deter + n scenarios + target
+        nb_columns = 1 + num_scenarios + 1 + 1 + 1     # Pred deter + n scenarios + variance + target + histogram
 
         # Number of vertical slots
         nb_slots = num_channels + 1 + (len(list_input_plot))// nb_columns     # DEM + input + temp_factor (given that we have 3 columns)      
@@ -101,7 +137,7 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         plt.figure(figsize=(12 + 4 * nb_columns, 5 * num_channels))
 
         # Plot DEM & inputs
-        plot_img(dem_plot, False, nb_slots, 1, "DEM", nb_column=nb_columns)
+        plot_img(dem_plot, "DEM", nb_slots, 1, "DEM", nb_column=nb_columns)
 
         for k in range(len(list_input_plot)):
             plot_img(list_input_plot[k], True, nb_slots, 2+k, f"Frame {k} (Timestep {list_time[k]})", nb_column=nb_columns)
@@ -121,9 +157,32 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
                 plot_img(pred_img[k][c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + 2 + k, 
                         f"Final prediction - Timestep {c+1} - Scenario {k+1}", delta=new_scale, nb_column=nb_columns)
 
+            ### Plot the variance 
+            std = [pred_img[k][c] for k in range(num_scenarios)]
+            std = np.stack(std, axis=0)
+            std = np.std(std, axis=0)
+            max_std = np.max(std)
+
+            # Min max normalization to scale the std to [0, 1]
+            if max_std != 0:
+                normalized_std = std / max_std
+            else:
+                normalized_std = np.zeros_like(std)
+            plot_img(normalized_std, "variance", nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + 2, 
+                        f"Variance between scenarios - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+
             # Target
-            plot_img(target_img[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + 2 + num_scenarios, 
+            plot_img(target_img[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + 3, 
                      f"Target - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+            
+            # Histograms
+            average = np.mean(np.stack([pred_img[k][c] for k in range(num_scenarios)], axis = 0), axis = 0) # Take the mean over the scenarios
+            target = target_img[c]
+            # plot the target and predicted histogram over the same figure
+            plot_histo(pred = average, target = target, title = f"Distribution - Timestep {c+1}", nb_slot=nb_slots, nb_column=nb_columns,
+                        position=nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + 4)
+                           
+
 
         # Save the plot
         # Design the name of the file
@@ -277,7 +336,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
                 min_loss_of_the_worst = worst_loss[0]
 
 
-            threshold_best = 0.01
+            threshold_best = 0.005
             if len(best_loss) < best_worst_to_plot:
                 # Best loss
                 idx = 0
