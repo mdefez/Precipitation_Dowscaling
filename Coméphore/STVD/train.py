@@ -32,7 +32,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Train the model a,d returns the average loss & the weights
 def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
-          temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion,
+          temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion, use_diffusion,
           testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
 
     assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
@@ -86,7 +86,10 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
     # Define the loss function & optimizer
     criterion = loss_function
-    optimizer = optim.Adam(list(model_deter.parameters()) + list(model_diffusion.parameters()), lr=learning_rate)
+    if use_diffusion == True:
+        optimizer = optim.Adam(list(model_deter.parameters()) + list(model_diffusion.parameters()), lr=learning_rate)
+    else:
+        optimizer = optim.Adam(list(model_deter.parameters()), lr=learning_rate)
     scheduler = scheduler(optimizer = optimizer) # We use a scheduler to control the global learning rate
 
     # We add a warmup to the scheduler to deal with eventual bad weights initialization
@@ -104,7 +107,8 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     for epoch in range(1, epochs + 1):
         print(f"Epoch {epoch}")
         model_deter.train()
-        model_diffusion.train()
+        if use_diffusion:
+            model_diffusion.train()
 
         total_loss = 0
 
@@ -122,22 +126,26 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             # Compute the output of the deterministic model
             output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint_deter)     # Compute the output
 
-            ### Compute the output of the diffusion model
-            A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
-            # Pass the input as the right format for the diffusion model
-            model_input, temporal_embed, t, true_velo = setup_input(device = device, 
-                                          scheduler = scheduler_diff, 
-                                          A_seq = A_seq, 
-                                          C = output_deter, 
-                                          B = target, 
-                                          temporal_encoder = temporal_encoder)
+            if use_diffusion:
+                ### Compute the output of the diffusion model
+                A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
+                # Pass the input as the right format for the diffusion model
+                model_input, temporal_embed, t, true_velo = setup_input(device = device, 
+                                            scheduler = scheduler_diff, 
+                                            A_seq = A_seq, 
+                                            C = output_deter, 
+                                            B = target, 
+                                            temporal_encoder = temporal_encoder)
 
-            pred_velo = model_diffusion(model_input, temporal_embed, t)
+                pred_velo = model_diffusion(model_input, temporal_embed, t)
 
-            loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the velocity)
+                loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the velocity)
 
-            if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
-                loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+                if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
+                    loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+
+            else:       # Only deterministic approach
+                loss = nn.MSELoss()(output_deter, target)
 
             optimizer.zero_grad()                   # Set the gradients to 0                
             loss.backward()                         # Compute the gradients
@@ -163,7 +171,8 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             # Evaluate the model on the validating dataset
             print("Validating")
             model_deter.eval()
-            model_diffusion.eval()
+            if use_diffusion:
+                model_diffusion.eval()
             total_test_loss = 0
 
             # To compute progress over testing
@@ -177,22 +186,26 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                     # Compute the output of the deterministic model
                     output_deter = model_deter(list_low_res, channel, apply_constraint = True)    
 
-                    ### Compute the output of the diffusion model
-                    A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
-                    # Pass the input as the right format for the diffusion model
-                    model_input, temporal_embed, t, true_velo = setup_input(device = device, 
-                                                scheduler = scheduler_diff, 
-                                                A_seq = A_seq, 
-                                                C = output_deter, 
-                                                B = target, 
-                                                temporal_encoder = temporal_encoder)
+                    if use_diffusion:
+                        ### Compute the output of the diffusion model
+                        A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
+                        # Pass the input as the right format for the diffusion model
+                        model_input, temporal_embed, t, true_velo = setup_input(device = device, 
+                                                    scheduler = scheduler_diff, 
+                                                    A_seq = A_seq, 
+                                                    C = output_deter, 
+                                                    B = target, 
+                                                    temporal_encoder = temporal_encoder)
 
-                    pred_velo = model_diffusion(model_input, temporal_embed, t)
+                        pred_velo = model_diffusion(model_input, temporal_embed, t)
 
-                    test_loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the noise)
+                        test_loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the noise)
 
-                    if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
-                        test_loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+                        if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
+                            test_loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+
+                    else:
+                        test_loss = nn.MSELoss()(output_deter, target)
 
                     total_test_loss += test_loss.item()
 
@@ -201,11 +214,15 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             # Update weights if best model
             if avg_test_loss <= best_loss:
                 best_weights_deter = model_deter.state_dict()
-                best_weights_diffusion = model_diffusion.state_dict()
+                if use_diffusion:
+                    best_weights_diffusion = model_diffusion.state_dict()
+                else:
+                    best_weights_diffusion = None
 
                 # Save the ongoing best model 
                 tool.save_model_deter(best_weights_deter, name_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
-                tool.save_model_diffu(best_weights_diffusion, name_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
+                if use_diffusion:
+                    tool.save_model_diffu(best_weights_diffusion, name_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
 
                 best_loss = avg_test_loss
                 patience_counter = 0
@@ -213,8 +230,9 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 patience_counter += 1
 
             # Early stop if no significant improve for too long (n testing epochs, so 3*n real epochs)
-            patience_treshold = None       # Set to None if one doesn't want any early stopping
+            patience_treshold = 5       # Set to None if one doesn't want any early stopping
             if patience_treshold != None and patience_counter >= patience_treshold:
+                print(f"Early stopping at epoch {epoch}")
                 return best_weights_deter, best_weights_diffusion, best_loss
 
 

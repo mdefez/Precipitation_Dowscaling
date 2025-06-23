@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
+# Scheduler for the diffusion model. It's a classic one, one could choose between linear/quadratic increase for Betas
 class DiffusionScheduler:
     def __init__(self, timesteps, type, beta_start=1e-4, beta_end=0.02):
         self.timesteps = timesteps
@@ -27,8 +28,9 @@ class DiffusionScheduler:
 
         return sqrt_ab * x_start + sqrt_one_minus_ab * noise
 
-
-# Pour coder chaque image de la séquence (C, H, W) en un vecteur riche de taille 256. Ca sort donc un vecteur [B, T, 256].
+# This embeds each frame (C, H, W) of the sequence in a 256D "rich" vector
+# Output is thus [B, T, 256] where T is the length of the sequence
+# This is used in the encoder part to compute cross attention on
 class TemporalEncoder(nn.Module):
     def __init__(self, input_channels, embed_dim, seq_len):
         super().__init__()
@@ -40,22 +42,23 @@ class TemporalEncoder(nn.Module):
     def forward(self, x_seq):  # x_seq: (B, T, C, H, W)
         B, T, C, H, W = x_seq.shape
         x_seq = x_seq.view(B * T, C, H, W)
-        x = self.cnn(x_seq)  # (B*T, D, H, W), CNN classique
-        x = F.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1)  # (B*T, D), on fait un average pooling sur tout (H, W)
+        x = self.cnn(x_seq)  # (B*T, D, H, W), usual CNN
+        x = F.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1)  # (B*T, D), we are making an average pooling on the image of dimensions (H, W)
         x = x.view(B, T, -1)  # (B, T, D)
         x = x + self.pos_embed.unsqueeze(0)
         x = self.transformer(x.transpose(0, 1))  # (T, B, D)
         return x.transpose(0, 1)  # (B, T, D)
     
-# --- Embedding sinusoidal du temps t --- pour que le UNet prenne en compte le step de diffusion
-# On code le step t en un vecteur de grande dimension dont les composantes sont des fonctions du step t (plus ou moins des fonctions trigos)
+
+# This functions is used to embed the denoising step t instead of using it as a scalar (the UNet can't use scalar as input easily, it must be embedded)
+# It basically embedds the noising step into a vector of high dimension whose values are like trigonometric functions of t
 class TimeEmbedding(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
 
     def forward(self, t):
-        # t: (B,) entier scalaire temps (step)
+        # t: (B,) scalar t
         device = t.device
         half_dim = self.dim // 2
         emb = np.log(10000) / (half_dim - 1)
@@ -63,9 +66,10 @@ class TimeEmbedding(nn.Module):
         emb = t[:, None].float() * emb[None, :]  # (B, half_dim)
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)  # (B, dim)
 
-        return emb  # (B, dim)
+        return emb  # (B, dim), dim is the final dimension of the temporal vector
 
-
+# Usual way to compute cross attention 
+# The feature map pays attention to the temporal embedding
 class CrossAttentionBlock(nn.Module):
     def __init__(self, embed_dim, feature_dim):
         super().__init__()
@@ -84,10 +88,10 @@ class CrossAttentionBlock(nn.Module):
         attn = torch.softmax(queries @ keys.transpose(-2, -1) / (C ** 0.5), dim=-1)
         attended = attn @ values  # (B, H*W, D)
         out = self.out_proj(attended)  # (B, H*W, C)
-        return (feat + out).permute(0, 2, 1).view(B, C, H, W)  # Residual
+        return (feat + out).permute(0, 2, 1).view(B, C, H, W)  # Residual approach
 
 
-# Weight standardized
+# Weight standardized 2D convolution, prevents overfitting.
 class WSConv2d(nn.Conv2d):
     def forward(self, x):
         # x: (B, C_in, H, W)
@@ -100,6 +104,9 @@ class WSConv2d(nn.Conv2d):
             x, weight, self.bias, self.stride, self.padding, self.dilation, self.groups
         )  # Output: (B, C_out, H, W)
 
+# Big convolutionnal block used in the diffusion UNet
+# We use FiLM to take advantage of the denoising step t : We pass t into a MLP to extract 2 features gamma & beta that are used to scale the output of our convolutions
+# Otherwise, we use 2 convs + ReLU
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_emb_dim):
         super().__init__()
@@ -130,11 +137,13 @@ class ConvBlock(nn.Module):
         out = gamma * (x2 + 1) + beta  # (B, out_ch, H, W), +1 is for residual approach
 
         return out, out.clone()  # return 2 to save a skip
+    
 
-
+# Global diffusion UNet
 class UNetforDiffusion(nn.Module):
     def __init__(self, in_channels, base_channels, embed_dim, time_emb_dim, temp_factor, spatial_factor):
         super().__init__()
+        # SR factors
         self.temp_factor = temp_factor
         self.spatial_factor = spatial_factor
 
@@ -145,9 +154,9 @@ class UNetforDiffusion(nn.Module):
         self.encoder1 = ConvBlock(in_channels, base_channels, time_emb_dim)
         self.encoder2 = ConvBlock(base_channels, base_channels * 2, time_emb_dim)
         self.encoder3 = ConvBlock(base_channels * 2, base_channels * 4, time_emb_dim)
-        self.encoder4 = ConvBlock(base_channels * 4, base_channels * 8, time_emb_dim)       # Bottleneck
 
-        self.encoder = nn.ModuleList([self.encoder1, self.encoder2, self.encoder3, self.encoder4])
+        # Bottleneck
+        self.encoder4 = ConvBlock(base_channels * 4, base_channels * 8, time_emb_dim)       
 
         # Pooling
         self.pool = nn.MaxPool2d(2)
@@ -156,7 +165,7 @@ class UNetforDiffusion(nn.Module):
         self.attn_blocks = nn.ModuleList([CrossAttentionBlock(embed_dim, base_channels), CrossAttentionBlock(embed_dim, base_channels * 2),
             CrossAttentionBlock(embed_dim, base_channels * 4), CrossAttentionBlock(embed_dim, base_channels * 8)])
 
-        # Decoder
+        # Decoder. Each layer is the combination of a transposed convolution to upsample and a Convolutional block with FiLM
         self.upconv3 = nn.ConvTranspose2d(base_channels * 8, base_channels * 4, 2, stride=2)
         self.decoder3 = ConvBlock(base_channels * 8, base_channels * 4, time_emb_dim)
         self.upconv2 = nn.ConvTranspose2d(base_channels * 4, base_channels * 2, 2, stride=2)
@@ -164,11 +173,13 @@ class UNetforDiffusion(nn.Module):
         self.upconv1 = nn.ConvTranspose2d(base_channels * 2, base_channels, 2, stride=2)
         self.decoder1 = ConvBlock(base_channels * 2, base_channels, time_emb_dim)
 
+        # Make them a list to simplify coding
+        self.encoder = nn.ModuleList([self.encoder1, self.encoder2, self.encoder3, self.encoder4])
         self.decoder = nn.ModuleList([self.decoder1, self.decoder2, self.decoder3])
         self.upconv = nn.ModuleList([self.upconv1, self.upconv2, self.upconv3])
 
-        # Final layer
-        self.final = nn.Sequential(nn.Conv2d(in_channels = base_channels, out_channels = self.temp_factor, kernel_size = 1))  # Predict 1-channel residual (the noise)
+        # Final layer : 1*1 convolution
+        self.final = nn.Sequential(nn.Conv2d(in_channels = base_channels, out_channels = self.temp_factor, kernel_size = 1))  # Predict temp_factor-channel residual (the noise)
 
     # To match x's size to target before concatenating
     def pad_to_match(self, x, target):
@@ -185,15 +196,15 @@ class UNetforDiffusion(nn.Module):
 
 
 
-    def forward(self, x, temporal_embedding, t):      # "Real" diffusion model, the real forward is right after
+    def forward(self, x, temporal_embedding, t):      # forward pass of the diffusion model
 
-        t_emb = self.time_emb(t)  # (B, time_emb_dim), denoising step
+        t_emb = self.time_emb(t)  # (B, time_emb_dim), embedded denoising step
 
-        # --- Encoder ---
+        # Encoder
         skips = []
         e = x
         for i in range(len(self.encoder)):
-            e, skip = self.encoder[i](e, t_emb)
+            e, skip = self.encoder[i](e, t_emb)             # Remember the output for the skip connection
             e = self.attn_blocks[i](e, temporal_embedding)  # Pay attention to the whole (embedded) sequence
             if i < len(self.encoder) - 1:
                 skips.append(skip)
@@ -202,7 +213,7 @@ class UNetforDiffusion(nn.Module):
                 # Last encoder (= bottleneck) has no skip connection to keep
                 skips.append(None)
 
-        # --- Decoder ---
+        # Decoder
         d = e
         for i in reversed(range(len(self.decoder))):
             d = self.upconv[i](d)

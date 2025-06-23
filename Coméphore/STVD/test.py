@@ -17,6 +17,7 @@ from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 import numpy as np
 from inference import sample_diffusion
+from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -95,7 +96,40 @@ def plot_histo(pred, target, title, nb_slot, nb_column, position):
     plt.ylabel("Frequency")
     plt.legend()
     plt.show()
-    
+
+def plot_fft(pred, target, nb_slot, nb_column, position):
+
+    # Compute FFT 2D (in space) and returns the log-scaled magnitude
+    def compute_fft_magnitude(image):
+        fft = np.fft.fft2(image)
+        fft_shifted = np.fft.fftshift(fft)  # Shift zero-freq to center
+        magnitude = np.abs(fft_shifted)
+        log_magnitude = np.log1p(magnitude)  # log(1 + x) for numerical stability
+        return log_magnitude
+
+    fft_pred = compute_fft_magnitude(pred)
+    fft_target = compute_fft_magnitude(target)
+
+    plt.subplot(nb_slot, nb_column, position)
+    plt.subplots_adjust(hspace=0.4) 
+    plt.subplots_adjust(wspace=0.5) 
+
+    signed_diff = fft_pred - fft_target
+
+    plt.title("Spectrum Difference (First Scenario - Target)")
+    plt.imshow(signed_diff, cmap='seismic', vmin=-np.max(np.abs(signed_diff)), vmax=np.max(np.abs(signed_diff)))
+    plt.colorbar(label='Log Magnitude Difference')
+    # Remove axis and plot a dark square along the plot
+    ax = plt.gca()
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    for spine in ax.spines.values():
+        spine.set_edgecolor('black')
+        spine.set_linewidth(0.5)
+        spine.set_visible(True)
+        
 
 # Function to plot all the relevant images and save them
 def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, targets, output_dir, delta, multiple_scenarios,
@@ -129,7 +163,9 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         num_channels = pred_img[0].shape[0]
 
         # Number of horizontal slots
-        nb_columns = 1 + num_scenarios + 1 + 1 + 1     # Pred deter + n scenarios + variance + target + histogram
+        nb_columns = 1 + num_scenarios + 1 + 1 + 1     # Pred deter + n scenarios + target + histogram + FFT (diff pred & target)
+        if multiple_scenarios == True:
+            nb_columns += 1             # Variance
 
         # Number of vertical slots
         nb_slots = num_channels + 1 + (len(list_input_plot))// nb_columns     # DEM + input + temp_factor (given that we have 3 columns)      
@@ -144,43 +180,56 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
 
         # Loop over the n timesteps
         for c in range(num_channels):
+            count = 0           # To keep track of the frame's positionning
+
             new_scale = False   
             if delta == True and c >= 1:    # To change the range of the colormap if we plot deltas
                 new_scale = True
 
             # Prediction of the deterministic model
-            plot_img(pred_img_deter[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + 1, 
+            plot_img(pred_img_deter[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + count + 1, 
                      f"Prediction (deterministic) - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+            count += 1
 
             for k in range(num_scenarios):
                 # Plot a scenario
-                plot_img(pred_img[k][c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + 2 + k, 
+                plot_img(pred_img[k][c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + count + 1 + k, 
                         f"Final prediction - Timestep {c+1} - Scenario {k+1}", delta=new_scale, nb_column=nb_columns)
+            count += 1
 
             ### Plot the variance 
-            std = [pred_img[k][c] for k in range(num_scenarios)]
-            std = np.stack(std, axis=0)
-            std = np.std(std, axis=0)
-            max_std = np.max(std)
+            if num_scenarios >= 2:
+                std = [pred_img[k][c] for k in range(num_scenarios)]
+                std = np.stack(std, axis=0)
+                std = np.std(std, axis=0)
+                max_std = np.max(std)
 
-            # Min max normalization to scale the std to [0, 1]
-            if max_std != 0:
-                normalized_std = std / max_std
-            else:
-                normalized_std = np.zeros_like(std)
-            plot_img(normalized_std, "variance", nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + 2, 
-                        f"Variance between scenarios - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+                # Min max normalization to scale the std to [0, 1]
+                if max_std != 0:
+                    normalized_std = std / max_std
+                else:
+                    normalized_std = np.zeros_like(std)
+                plot_img(normalized_std, "variance", nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + count, 
+                            f"Variance between scenarios - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+                count += 1
 
             # Target
-            plot_img(target_img[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + 3, 
+            plot_img(target_img[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + count, 
                      f"Target - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+            count += 1
             
             # Histograms
             average = np.mean(np.stack([pred_img[k][c] for k in range(num_scenarios)], axis = 0), axis = 0) # Take the mean over the scenarios
             target = target_img[c]
             # plot the target and predicted histogram over the same figure
             plot_histo(pred = average, target = target, title = f"Distribution - Timestep {c+1}", nb_slot=nb_slots, nb_column=nb_columns,
-                        position=nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + 4)
+                        position=nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + count)
+            count += 1
+            
+            # FFT 2D (in space) for the first scenario & the target
+            plot_fft(pred=pred_img[0][c], target=target, nb_slot = nb_slots, nb_column = nb_columns, 
+                     position = nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + count)
+            count += 1
                            
 
 
@@ -204,7 +253,7 @@ def load_model(model, filepath):
     return model
 
 
-def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios,
+def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios, use_diffusion,
          criterion, batch_size, asked_model, model_parameters, delta, n_inputs, model_parameters_diffusion):
     
     output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
@@ -215,10 +264,12 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         model = UNet_with_attention(model_parameters=model_parameters, temp_factor=temp_factor, spatial_factor=spatial_factor)  # Set the type of model we are using
     
     elif asked_model == "bicubic":
-        model = bicubic(temp_factor=temp_factor, spatial_factor=spatial_factor)
+        model_deter = bicubic(temp_factor=temp_factor, spatial_factor=spatial_factor)
+        model_deter.to(device)
 
     elif asked_model == "nearest_neighbor":
-        model = nearest_neighbor(temp_factor=temp_factor, spatial_factor=spatial_factor)
+        model_deter = nearest_neighbor(temp_factor=temp_factor, spatial_factor=spatial_factor)
+        model_deter.to(device)
 
     # Filepath to the .pth file, where are stored the model's weights
     filepath_deter = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
@@ -233,13 +284,14 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
     in_channels = 2*(temp_factor) + 1
     nb_steps, beta, conservative_mass_diffusion = model_parameters_diffusion
 
-    model_diffu = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128, temp_factor = temp_factor, 
-                                   spatial_factor = spatial_factor)
-    model_diffu = load_model(model_diffu, filepath_diffu)  # Load the weights
-    model_diffu.to(device)
+    if use_diffusion:
+        model_diffu = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128, temp_factor = temp_factor, 
+                                    spatial_factor = spatial_factor)
+        model_diffu = load_model(model_diffu, filepath_diffu)  # Load the weights
+        model_diffu.to(device)
 
-    scheduler = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1], type = beta[2])
-    temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_inputs).to(device).eval()
+        scheduler = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1], type = beta[2])
+        temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_inputs).to(device).eval()
 
     # Loading the test dataset
 
@@ -247,7 +299,8 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
     # Evaluate
     model_deter.eval()
-    model_diffu.eval()
+    if use_diffusion:
+        model_diffu.eval()
 
 
     # To store the best / worst predictions
@@ -287,12 +340,11 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
     best_worst_to_plot = 10 # Number of best / worst sample to plot
 
     with torch.no_grad():
-        stop = 10
-        count = 0
-        for list_low_res, channel, target, time_idx in test_loader:
-            count += 1
-            if count == stop:
-                break
+
+        crps = 0        # Initialize the CRPS value
+
+        for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
+
             channel, target = channel.to(device), target.to(device)
             for k in range(len(list_low_res)):
                 list_low_res[k] = list_low_res[k].to(device)
@@ -300,16 +352,23 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
             # Compute the output of the deterministic model
             output_deter = model_deter(list_low_res, channel, apply_constraint = True)     
 
-            # Compute the output of the diffusion model
-            A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
+            if use_diffusion:
+                # Compute the output of the diffusion model
+                A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
 
-            # The output is a list of n "real" outputs. It corresponds to n different scenarios
-            # We only compute the n scenarios to plot them. After the first batch, we set n to 1. 
-            B_pred = sample_diffusion(model_diffu, scheduler, A_seq, C = output_deter, temporal_encoder = temporal_encoder, n_scenarios = n_scenarios,
-                                      num_steps=nb_steps, last_frame = list_low_res[-1], conservative_mass_diffusion = conservative_mass_diffusion) 
+                # The output is a list of n "real" outputs. It corresponds to n different scenarios
+                # We only compute the n scenarios to plot them (and compute CRPS). After the first batch, we set n to 1. 
+                B_pred = sample_diffusion(model_diffu, scheduler, A_seq, C = output_deter, temporal_encoder = temporal_encoder, n_scenarios = n_scenarios,
+                                        num_steps=nb_steps, last_frame = list_low_res[-1], conservative_mass_diffusion = conservative_mass_diffusion) 
+                
+            else:       # If only deterministic, we compute one scenario and put it into a list to feed the right format
+                B_pred = [output_deter]
 
             # We compute the loss for a random scenario (the first for example)
             test_loss = criterion(B_pred[0], target) # Compute the average loss for each of the specified metric
+            if use_diffusion:   # We can compute CRPS only for probabilistic approach
+                if crps == 0:       # We compute it only once
+                    crps += criterion.crps(B_pred, target, lambda x: x)        # Compute the mean CRPS over the batch, the function sets the weights in the CRPS formula
             loss_vector = criterion.forward_vecteur(B_pred[0], target) # Compute the marginal loss only for the main metric
 
             try:    # If it exists, add the loss to the total loss
@@ -336,7 +395,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
                 min_loss_of_the_worst = worst_loss[0]
 
 
-            threshold_best = 0.005
+            threshold_best = 0.001
             if len(best_loss) < best_worst_to_plot:
                 # Best loss
                 idx = 0
@@ -393,5 +452,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
     avg_test_loss = total_test_loss / len(test_loader)
     print(f"Test Loss: {avg_test_loss} for the following metrics \n{criterion.name_metric}")
+    if use_diffusion:
+        print(f"CRPS = {crps}")
 
 

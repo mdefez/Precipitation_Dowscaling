@@ -84,6 +84,26 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
 
         return loss 
     
+    def crps(self, list_outputs, target, v_func = lambda x: x**2):      # Compute the CRPS over a list of outputs (list of length the number of scenarios, each item is a batch)
+
+        # Transform the list of outputs as a tensor [M, B]
+        ensemble_tensor = torch.stack(list_outputs)  # [M, B]
+        M = ensemble_tensor.size(0)
+
+        # Apply the function v
+        v_ensemble = v_func(ensemble_tensor)     # [M, B]
+        v_y = v_func(target).unsqueeze(0)             # [1, B] 
+
+        # First quantity : Bias
+        term1 = torch.mean(torch.abs(v_ensemble - v_y), dim=0)  # [B]
+
+        # Second quantity : Spread between scenarios
+        diff = v_ensemble.unsqueeze(1) - v_ensemble.unsqueeze(0)  # [M, M, B]
+        term2 = torch.mean(torch.abs(diff), dim=(0,1))  # [B]
+
+        return (term1 - 0.5 * term2).mean()         # mean over the batch
+
+    
 
 # Computes the absolute difference between the 99th percentiles of output and target for each image/channel, and averages channels (and eventually batch depending on the reduction)
 class PercentileDifferenceLoss(nn.Module):
@@ -112,3 +132,21 @@ class PercentileDifferenceLoss(nn.Module):
             return loss_per_image             # [B]
 
 
+
+# Computes the temporal coherence (squared difference between lag 1) for the target and the prediction
+# Returns the signed difference pred - target
+class Temporal_coherence(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, output, target):    # output and target are (B, C, H, W)
+
+        # Output
+        diffs_output = np.diff(output, axis=1)       # shape: (B, C-1, H, W)
+        energy_output = np.mean(diffs_output**2)           # Mean over the pixels and the batch. Scalar
+
+        # Target
+        diffs_target = np.diff(target, axis=1)       
+        energy_target = np.mean(diffs_target**2)
+
+        return energy_output - energy_target

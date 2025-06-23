@@ -16,7 +16,7 @@ import sys
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic')
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
 from dataset import RainSuperResDataset
-from loss import LossTest, PercentileDifferenceLoss
+from loss import LossTest, PercentileDifferenceLoss, Temporal_coherence
 import tools as tool 
 from test import test 
 from cross_validation import k_fold, simple_training
@@ -37,23 +37,23 @@ if torch.cuda.is_available():
 # Super resolution factors
 temp_factor = 1
 spatial_factor = 10
-n_inputs = 4       # Frames to take into account as input, the last one is the image to downscale
+n_inputs = 1       # Frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
 n_scenarios = 3     # Number of scenarios to compute
 
 n_days_train = 28 # Only first n_days are used for each month
-n_days_test = 5
+n_days_test = 28
 
 # Choose wether we want to train/test/both
-training = True 
+training = False 
 normalizing = False # If False, the code will import the last normalizer saved
 testing = True 
 
 cross_val = False # If we want to perform cross validation or simple training
 
 # Training features
-batch_size = 48
+batch_size = 96
 epochs = 300
 learning_rate = 1e-4
 
@@ -78,7 +78,7 @@ treshold_constraint_deter = 10 # Epoch where we should begin to apply conservati
 
 # Attention parameters
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
-strat_attention = ["time", "space"]
+strat_attention = [None]
 
 nb_heads = 4        # Number of attention heads used during the MHA (both for time & space)
 window_size = 3     # window size for spatial attention
@@ -96,10 +96,13 @@ dir_weights_deter = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitatio
 dir_weights_deter = None
 
 # Choice of the model and parameters
-model_deter = "UNet_with_attention" 
+model_deter = "nearest_neighbor" 
 model_deter_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads, window_size, mse_deter, dir_weights_deter)
+model_deter_parameters = [None]
 
 ### Diffusion model ###
+use_diffusion = False        # If we want to use diffusion or only the deterministic approach
+
 nb_steps = 1000
 beta = (1e-4, 0.02, "linear")       # beta_start, beta_end, linear/quadratic
 
@@ -111,10 +114,10 @@ model_parameters_diffusion = (nb_steps, beta, conservative_mass_diffusion)
 # Loss function (used for training)
 base_loss = nn.MSELoss       # Loss function over velocity or noise
 
-name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE"}
+name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE", Temporal_coherence : "Temporal coherence"}
 
 # Metric (used for testing)
-metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
+metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss, Temporal_coherence]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
 name_metric = [name_loss[metric] for metric in metric_test]     # Name of the metrics
 df_metric = pd.DataFrame({"Name" : name_metric, "Metric" : metric_test})
 
@@ -137,10 +140,10 @@ strat_dem = "min_max"
 
 
 # Design the name of the run
-name_of_the_run = f"input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint_deter}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
+name_of_the_run = f"diffusion_{use_diffusion}_input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint_deter}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
 
 if model_deter in ["bicubic", "nearest_neighbor"]: # If the model is not trainable
-    name_of_the_run = f"loss_{name_loss[base_loss]}"
+    name_of_the_run = f"{model_deter}_n_days_test_{n_days_test}"
 
 ####################################################################################################################################################################################
 ####################################################################################################################################################################################
@@ -159,6 +162,9 @@ assert not (n_days_test == 1 or n_days_train == 1), "Training or Testing set is 
 assert not (training == True and model_deter in ["nearest_neighbor", "bicubic"]), "You are trying to train an untrainable model"
 assert not (model_deter in ["nearest_neighbor", "bicubic"] and n_inputs != 1), "You should not set n_inputs to more than 1 if you are using untrainable models"
 assert strat_dem in dict_strategies and strat_precip in dict_strategies, "You chose an unavailable scaling strategies"
+
+print(f"SR factor ({spatial_factor}, {temp_factor})")
+print(f"RUN : {name_of_the_run}")
 
 # CV pipeline 
 if training:
@@ -185,12 +191,13 @@ if training:
                                                                          name_of_the_run = name_of_the_run, temp_factor = temp_factor, 
                                                                          spatial_factor = spatial_factor, model = model_deter, 
                                                                          model_parameters = model_deter_parameters, treshold_constraint_deter = treshold_constraint_deter,
-                                                                         n_input = n_inputs, 
+                                                                         n_input = n_inputs, use_diffusion = use_diffusion,
                                                                          model_parameters_diffusion = model_parameters_diffusion)
 
     # Save the best model & the associated normalization
     tool.save_model_deter(weights_deter, name_of_the_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
-    tool.save_model_diffu(weights_diffu, name_of_the_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
+    if use_diffusion:
+        tool.save_model_diffu(weights_diffu, name_of_the_run, spatial_factor=spatial_factor, temp_factor=temp_factor)
     if normalizing:
         tool.save_transfo(output_path = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/normalization", 
                  best_stats_precip = best_stats_precip, best_stats_dem = best_stats_dem, strat_dem = strat_dem, strat_precip = strat_precip)
@@ -224,7 +231,7 @@ if testing:
 
     test(test_dataset=normalized_test_dataset, spatial_factor=spatial_factor, temp_factor=temp_factor, name_of_the_run=name_of_the_run,
          criterion=metric, batch_size=batch_size, asked_model=model_deter, model_parameters=model_deter_parameters, delta = delta, n_inputs = n_inputs,
-         model_parameters_diffusion = model_parameters_diffusion, n_scenarios=n_scenarios)
+         model_parameters_diffusion = model_parameters_diffusion, n_scenarios=n_scenarios, use_diffusion = use_diffusion)
 
 
 end_time_testing = time.time()
