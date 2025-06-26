@@ -3,6 +3,7 @@
 import torch 
 import torch.nn as nn
 import numpy as np
+from scipy.stats import wasserstein_distance
 import copy
 
 class CustomLossTrain(nn.Module):
@@ -79,7 +80,7 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
         return loss
 
 
-    def forward_vecteur(self, outputs, targets): # Compute the loss as a vector (only for the main metric)
+    def forward_vecteur(self, outputs, targets): # Compute the loss as a vector (only for the main metric), useful for selecting the "best" and "worst" samples
         loss = self.loss_vector(outputs, targets).mean(dim = (1, 2, 3)) 
 
         return loss 
@@ -107,11 +108,10 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
 
 # Computes the absolute difference between the 99th percentiles of output and target for each image/channel, and averages channels (and eventually batch depending on the reduction)
 class PercentileDifferenceLoss(nn.Module):
-    def __init__(self, percentile = 99, reduction = 'mean'):
+    def __init__(self, percentile = 99):
         super().__init__()
 
         self.percentile = percentile
-        self.reduction = reduction
 
     def forward(self, output, target):
 
@@ -124,29 +124,127 @@ class PercentileDifferenceLoss(nn.Module):
         target_p = torch.quantile(target_flat, self.percentile / 100.0, dim=2) # [B, C]
 
         diff = torch.abs(output_p - target_p)  # [B, C]
-        loss_per_image = diff.mean(dim=1)     # [B], mean over channels
+        loss_per_image = diff.mean()     # scalar, mean over channels & batch
 
-        if self.reduction == 'mean':
-            return loss_per_image.mean()      # scalar
-        else:  # 'none'
-            return loss_per_image             # [B]
+
+        return loss_per_image.mean()      # scalar
 
 
 
-# Computes the temporal coherence (squared difference between lag 1) for the target and the prediction
-# Returns the signed difference pred - target
-class Temporal_coherence(nn.Module):
+
+    
+
+# Compute the LSD between pred & target
+class Log_spectral_distance(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def precompute_bin_indices_torch(self, h, w, bins=128):
+        y, x = torch.meshgrid(torch.arange(h, device=self.device), torch.arange(w, device=self.device), indexing='ij')
+        center = (h // 2, w // 2)
+        r = torch.sqrt((x - center[1])**2 + (y - center[0])**2)
+        bin_edges = torch.linspace(0, r.max(), bins + 1, device=self.device)
+        bin_indices = torch.bucketize(r.flatten(), bin_edges) - 1  # (H*W,)
+        return bin_indices, bins
+
+    # From 2D FFT to 1D FFT by averaging radially
+    def batch_radial_average(self, images, bin_indices, bins):
+
+        B, C, H, W = images.shape
+        images_flat = images.reshape(B, C, -1)  # (B, C, H*W)
+
+        radial_means = torch.zeros((B, C, bins), device=images.device, dtype=images.dtype)
+
+        for b in range(bins):
+            mask = (bin_indices == b)
+            # Sum pixels in the bin for each B and C
+            sums = images_flat[:, :, mask].sum(dim=2)  # (B, C)
+            counts = mask.sum().item()
+            radial_means[:, :, b] = sums / (counts + 1e-16)
+
+        return radial_means
+
+    # Compute LSD over the whole batch
+    def forward(self, predictions, targets, bins=128, epsilon=1e-8):     # output and target are (B, C, H, W)
+
+        B, C, H, W = predictions.shape
+        device = predictions.device
+
+        # Compute FFT magnitude
+        fft_pred = torch.fft.fftshift(torch.fft.fft2(predictions, dim=(-2, -1)), dim=(-2, -1))      #  (B, C, H, W), complex
+        fft_target = torch.fft.fftshift(torch.fft.fft2(targets, dim=(-2, -1)), dim=(-2, -1))
+
+        mag_pred = torch.abs(fft_pred)      #  (B, C, H, W), float
+        mag_target = torch.abs(fft_target)
+
+        # Precompute bin indices for radius bins (same for all images)
+        bin_indices, bins = self.precompute_bin_indices_torch(H, W, bins)
+
+        # Radial averaging
+        radial_pred = self.batch_radial_average(mag_pred, bin_indices, bins)            
+        radial_target = self.batch_radial_average(mag_target, bin_indices, bins)
+
+        # Log of radial spectrum (epsilon for numerical stability)
+        log_radial_pred = torch.log(radial_pred + epsilon)          # (B, C, bins)
+        log_radial_target = torch.log(radial_target + epsilon)
+
+        # Compute the mean LSD over (B, C)
+        lsd_per_channel_image = torch.sqrt(torch.mean((log_radial_pred - log_radial_target) ** 2, dim=2))       # (B, C)
+        mean_lsd = lsd_per_channel_image.mean()  # scalar, mean over batch & channels
+
+        return mean_lsd # scalar
+
+
+
+# Compute the EMD after normalizing frames
+class EarthMovingDistance(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, output, target):    # output and target are (B, C, H, W)
+    # To compute proper EMD, the frame must sum up to 1
+    def normalize_images(self, imgs, epsilon=1e-8):
 
-        # Output
-        diffs_output = np.diff(output, axis=1)       # shape: (B, C-1, H, W)
-        energy_output = np.mean(diffs_output**2)           # Mean over the pixels and the batch. Scalar
+        imgs_flat = imgs.flatten(start_dim=2)  # (B, C, H*W)
+        sums = imgs_flat.sum(dim=2, keepdim=True) + epsilon  # (B, C, 1)
+        return imgs_flat / sums  # (B, C, H*W)
 
-        # Target
-        diffs_target = np.diff(target, axis=1)       
-        energy_target = np.mean(diffs_target**2)
+    def forward(self, predictions, targets):        # output and target are (B, C, H, W)
 
-        return energy_output - energy_target
+        B, C, H, W = predictions.shape
+        device = predictions.device
+
+        pred_norm = self.normalize_images(predictions)  # (B, C, H*W)
+        target_norm = self.normalize_images(targets)  # (B, C, H*W)
+
+        y, x = torch.meshgrid(torch.arange(H, device="cpu"), torch.arange(W, device="cpu"), indexing='ij')        # y, x: (H, W)
+        
+        # We need the coords to identify the "ground" and the associated distances between pixel (trivial in our case)
+        coords = torch.stack([x.flatten(), y.flatten()], dim=1).float()  # (H*W, 2)
+
+        emd_vals = torch.zeros((B, C), device="cpu")  # (B, C)
+
+        # unfortunately we must use loops because the function only runs with 1D-histogram (and not tensors)
+        for b in range(B):
+            for c in range(C):
+                p_dist = pred_norm[b, c].to("cpu")  # (H*W,)
+                q_dist = target_norm[b, c].to("cpu")  # (H*W,)
+                emd_vals[b, c] = wasserstein_distance(p_dist, q_dist, coords, coords)  # scalar
+
+        mean_emd = emd_vals.mean()  # scalar, mean over batch & channels
+
+        return mean_emd     # scalar
+
+
+
+
+
+
+
+
+
+
+
+
+
+

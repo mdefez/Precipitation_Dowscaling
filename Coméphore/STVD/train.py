@@ -36,8 +36,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
           testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
 
     assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
-    assert testing == False or isinstance(test_dataset, Dataset), "Can't test, test dataset not a torch dataset"
-    assert isinstance(train_dataset, Dataset), "Train dataset not a torch dataset"
     assert isinstance(name_run, str), "The name of the run is not a string"
 
     name_scheduler, epoch_batch, scheduler = strategy_scheduler # (Name of the schedule, Time where we need to update the scheduler, Scheduler object)
@@ -124,7 +122,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
 
             # Compute the output of the deterministic model
-            output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint_deter)     # Compute the output
+            output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint_deter)     # Compute the output of the deterministic model
 
             if use_diffusion:
                 ### Compute the output of the diffusion model
@@ -141,8 +139,11 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
                 loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the velocity)
 
-                if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
-                    loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+                try:
+                    if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
+                        loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+                except (NameError, UnboundLocalError):
+                    pass 
 
             else:       # Only deterministic approach
                 loss = nn.MSELoss()(output_deter, target)
@@ -201,8 +202,11 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
                         test_loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the noise)
 
-                        if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
-                            test_loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+                        try:
+                            if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
+                                loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
+                        except (NameError, UnboundLocalError):
+                            pass 
 
                     else:
                         test_loss = nn.MSELoss()(output_deter, target)
@@ -234,7 +238,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             if patience_treshold != None and patience_counter >= patience_treshold:
                 print(f"Early stopping at epoch {epoch}")
                 return best_weights_deter, best_weights_diffusion, best_loss
-
 
             print(f"Validating Loss : {avg_test_loss}")
             wandb.log({"Validating loss": avg_test_loss}) # Plot the loss on the website
