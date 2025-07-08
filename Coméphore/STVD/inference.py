@@ -10,7 +10,7 @@ from tools_diffu import setup_input_inference, apply_conservative_regridding_fin
 
 
 @torch.no_grad()
-def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps, last_frame, conservative_mass_diffusion, n_scenarios, device="cuda"):
+def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps, last_frame, conservative_mass_diffusion, n_scenarios, device):
     B, T, Channel, H, W = A_seq.shape
 
     # Store the n possible scenarios in a list

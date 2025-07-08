@@ -1,5 +1,5 @@
 # This is the main file used to run any architecture
-# One can train, test, visualize ...
+# One can train, test, visualize and compute metrics
 
 # Import librairies
 import torch 
@@ -16,7 +16,7 @@ import sys
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic')
 sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
 from dataset import RainSuperResDataset
-from loss import LossTest, PercentileDifferenceLoss, Log_spectral_distance, EarthMovingDistance
+from loss import LossTest, PercentileDifferenceLoss, Log_spectral_distance, EarthMovingDistance, SSIM, PITD
 import tools as tool 
 from test import test 
 from cross_validation import k_fold, simple_training
@@ -35,26 +35,26 @@ if torch.cuda.is_available():
 
 
 # Super resolution factors
-temp_factor = 6
-spatial_factor = 25
-n_inputs = 3       # Frames to take into account as input, the last one is the image to downscale
+temp_factor = 3
+spatial_factor = 10
+n_inputs = 4       # Ordered frames to take into account as input, the last one is the image to downscale
 delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
-n_scenarios = 5     # Number of scenarios to compute
+n_scenarios = 4     # Number of scenarios to compute
 
-n_days_train = 28 # Only first n_days are used for each month
-n_days_test = 28
+n_days_train = 28       # Only first n_days are used for each month. Set this to an integer between 2 and 28
+n_days_test = 28        # Same for n_test. 
 
-# Choose wether we want to train/test/both
+# Choose wether we want to train/test/both and normalize
 training = True 
-normalizing = False # If False, the code will import the last normalizer saved
+normalizing = False         # If False, the code will import the last normalizer saved
 testing = True 
 
-cross_val = False # If we want to perform cross validation or simple training
+cross_val = False           # If we want to perform cross validation or simple training/validating
 
 # Training features
-batch_size = 96 
-epochs = 300
+batch_size = 48 if spatial_factor <= 10 else 96 
+epochs = 120
 learning_rate = 1e-4
 
 # Data directories
@@ -69,16 +69,20 @@ required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n
                              "nearest_neighbor" : [None],
                              "bicubic" : [None]}
 
-### Deterministic model ###
-# Hard constraint mass
-available_strategy_mass = [None, "additive", ("multiplicative", "a function type that operates on tensors")] # The function should apply element wise for tensors
-def f_mass(x): # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and i thould not diverge when x is big
-    return 1e-5 + x**3 
-treshold_constraint_deter = 30 # Epoch where we should begin to apply conservative transformation for the deterministic model
+
+##### Deterministic model #####
+
+# Hard constraint mulitplicative mass conservation for the deterministic model
+available_strategy_mass = [None, ("a function type that operates on tensors", "image or patch scale")] # The function should apply element wise for tensors
+# Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and it should not diverge when x is big
+# It is thus recommended to choose a polynomial with an epsilon for numerical stability
+def f_mass(x): 
+    return 1e-7 + x**2 
+treshold_constraint_deter = 20 # Epoch where we should begin to apply conservative transformation for the deterministic model
 
 # Attention parameters
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
-strat_attention = [None]
+strat_attention = ["time", "space"]
 
 nb_heads = 4        # Number of attention heads used during the MHA (both for time & space)
 window_size = 3     # window size for spatial attention
@@ -87,7 +91,7 @@ if "space" not in strat_attention:
 
 # For the first n epochs, we add the MSE of the deterministic model (output VS target) in the loss function to force the deter to be decent
 lambda_mse = 1
-epoch_stop_mse_deter = -1 # Epoch where we should stop adding the MSE to the global loss function. Set to -1 if you don't want to use it
+epoch_stop_mse_deter = -1 # Epoch where we should stop adding the MSE to the global loss function. Set to -1 if one doesn't want to use it
 mse_deter = (lambda_mse, epoch_stop_mse_deter)
 
 # Load pre train deterministic model
@@ -96,35 +100,37 @@ dir_weights_deter = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitatio
 dir_weights_deter = None
 
 # Choice of the model and parameters
-model_deter = "bicubic" 
-model_deter_parameters = (("multiplicative", f_mass), n_inputs, strat_attention, nb_heads, window_size, mse_deter, dir_weights_deter)
-model_deter_parameters = [None]
+model_deter = "UNet_with_attention" 
+model_deter_parameters = (("image-scale", f_mass), n_inputs, strat_attention, nb_heads, window_size, mse_deter, dir_weights_deter)
 
-### Diffusion model ###
+
+##### Diffusion model #####
 use_diffusion = True        # If we want to use diffusion or only the deterministic approach
 
-nb_steps = 1000
+nb_steps = 1000                         # Number of denoising steps
 beta = (1e-4, 0.02, "quadratic")       # beta_start, beta_end, linear/quadratic
 
-conservative_mass_diffusion = ("multiplicative", f_mass)
+conservative_mass_diffusion = ("image-scale", f_mass)     # Scale (image or patch -scale) + Function for the multiplicative approach
 
 model_parameters_diffusion = (nb_steps, beta, conservative_mass_diffusion)
 
 
 # Loss function (used for training)
-base_loss = nn.MSELoss       # Loss function over velocity or noise
+base_loss = nn.MSELoss       # Loss function computed over velocity or noise. It is highly recommended to use MSE.
 
+# To define specific names for the metrics. All those custom losses are written in Deterministic/loss.py
 name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE",
-             Log_spectral_distance : "Log-spectral distance", EarthMovingDistance : "Earth-Moving Distance"}
+             Log_spectral_distance : "Log-spectral distance", EarthMovingDistance : "Earth-Moving Distance",
+             SSIM : "SSIM", PITD : "PITD"}
 
 # Metric (used for testing)
-metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss, Log_spectral_distance, EarthMovingDistance]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
+metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss, Log_spectral_distance, EarthMovingDistance, SSIM, PITD]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
 name_metric = [name_loss[metric] for metric in metric_test]     # Name of the metrics
 df_metric = pd.DataFrame({"Name" : name_metric, "Metric" : metric_test})
 
 metric = LossTest(df_metric=df_metric)
 
-# All available scheduler strategies
+# Scheduler strategies
 # Number of steps := number of batch that will be passed into the nn. 
 total_steps = epochs * (16 * len(RainSuperResDataset(input_dir, output_dir, channel_dir, 0, 0, train=True, n_days=n_days_train, n_inputs=n_inputs, temp_factor=temp_factor, spatial_factor=spatial_factor, delta=delta))) / batch_size   
 dict_scheduler = {"Step decay" : ("Step decay", "epoch", partial(StepLR, step_size= 10, gamma=0.2)), # Every step_size epoch, multiply the learning rate by gamma
@@ -138,7 +144,6 @@ dict_strategies = ["Standard", "min_max", "Robust"]
 
 strat_precip = "min_max"
 strat_dem = "min_max"
-
 
 # Design the name of the run
 name_of_the_run = f"diffusion_{use_diffusion}_input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint_deter}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
@@ -174,7 +179,7 @@ print(f"RUN : {name_of_the_run}")
 # CV pipeline 
 if training:
     print("Training")
-    # Training (Cross validating) dataset
+    # Training dataset
     # Loading all the datasets
     print("Data loading")
     dico_dataset = {}
@@ -212,7 +217,7 @@ if training:
 end_time_training = time.time()
 print(f"Training : {int((end_time_training - start_time) / 60)} minutes")
 
-# Model testing and vizualisation of some plots
+# Model testing and vizualisation 
 if testing:
     print("Testing")
     # Loading the testing dataset

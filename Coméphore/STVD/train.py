@@ -1,5 +1,5 @@
 # The goal of this file is to design a train function
-# It takes as input a training dataset and it trains the model on it 
+# It takes as input a training/validating dataset and it trains/tests the model on it 
 # It returns the weights and the loss
 # It returns the weights corresponding to the best model (on the validating set)
 
@@ -30,18 +30,15 @@ import wandb
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# Train the model a,d returns the average loss & the weights
+# Train the model and returns the average loss & the weights
 def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
           temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion, use_diffusion,
           testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
 
-    assert (isinstance(save_dir, str) and save_dir.endswith(".pth") == True) or (saving == False), "Can't save the weights in the specified directory"
-    assert isinstance(name_run, str), "The name of the run is not a string"
 
     name_scheduler, epoch_batch, scheduler = strategy_scheduler # (Name of the schedule, Time where we need to update the scheduler, Scheduler object)
 
-    apply_constraint_deter = False           # Initialize with False
-    apply_constraint_diffusion = False          # Initialize with False
+    apply_constraint_deter = False              # Initialize with False
 
     # To plot the loss on WandB, the run name stores the training features
     wandb.init(project='test', entity='mdefez-cv', name = name_run) 
@@ -53,7 +50,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     except:
         test_loader = None
 
-    # Define the model, loss function & optimizer
+    # Load the deterministic model
     if asked_model == "UNet_with_attention":
         lambda_mse_deter, epoch_mse_deter = model_parameters[5]     # Strategy for adding (or not) the MSE deterministic into the global loss function
         dir_weights_deter = model_parameters[6]                     # Get the directory of the deterministic's weights if filled
@@ -125,9 +122,10 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint_deter)     # Compute the output of the deterministic model
 
             if use_diffusion:
-                ### Compute the output of the diffusion model
-                A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
-                # Pass the input as the right format for the diffusion model
+                # Compute the output of the diffusion model
+                A_seq = bicubic_A_seq(list_low_res)     # Compute the bicubic HR from the LR to pass to the diffusion UNet
+
+                # Set up the input as the right format for the diffusion model
                 model_input, temporal_embed, t, true_velo = setup_input(device = device, 
                                             scheduler = scheduler_diff, 
                                             A_seq = A_seq, 
@@ -140,7 +138,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the velocity)
 
                 try:
-                    if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt the loss function to force the deterministic UNet to be decent
+                    if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt (if asked) the loss function to force the deterministic UNet to be decent
                         loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
                 except (NameError, UnboundLocalError):
                     pass 
@@ -161,13 +159,14 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
         if epoch_batch == "epoch":
             scheduler.step() # Tune the learning rate value
 
-        avg_loss = total_loss / len(train_loader) # Compute the aberage loss over the epoch
+        avg_loss = total_loss / len(train_loader) # Compute the average loss over the epoch
 
         wandb.log({f"Training Loss split {split}": avg_loss}) # Plot the loss on the website
         print(f"Epoch {epoch}/{epochs} - Loss: {avg_loss}")
 
 
         # Validate the model on the validating dataset if asked
+        # We validate every n epochs
         if testing == True and epoch % 3 == 0:
             # Evaluate the model on the validating dataset
             print("Validating")
@@ -188,7 +187,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                     output_deter = model_deter(list_low_res, channel, apply_constraint = True)    
 
                     if use_diffusion:
-                        ### Compute the output of the diffusion model
+                        # Compute the output of the diffusion model
                         A_seq = bicubic_A_seq(list_low_res)     # Compute the HR from the LR to pass the diffusion UNet
                         # Pass the input as the right format for the diffusion model
                         model_input, temporal_embed, t, true_velo = setup_input(device = device, 
@@ -233,8 +232,8 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             else: # Keep in mind the lack of improvement
                 patience_counter += 1
 
-            # Early stop if no significant improve for too long (n testing epochs, so 3*n real epochs)
-            patience_treshold = 5       # Set to None if one doesn't want any early stopping
+            # Early stop if no significant improve for too many validating epochs
+            patience_treshold = 7       # Set to None if one doesn't want any early stopping
             if patience_treshold != None and patience_counter >= patience_treshold:
                 print(f"Early stopping at epoch {epoch}")
                 return best_weights_deter, best_weights_diffusion, best_loss

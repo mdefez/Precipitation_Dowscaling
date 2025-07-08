@@ -27,7 +27,7 @@ def setup_input(device, scheduler, A_seq, C, B, temporal_encoder): # Set up inpu
     A_T = A_seq[:, -1]                                # (B, C, H, W)
     model_input = torch.cat([R_t, A_T, C], dim=1)     # (B, C_B + C_A + C_C = 2*temp_factor + 2, H, W)
 
-    # calcul de la vélocité
+    # calcul de la vraie vélocité
     sqrt_alpha_bar = torch.sqrt(scheduler.alpha_bars[t]).view(-1, 1, 1, 1)
     sqrt_one_minus_alpha_bar = torch.sqrt(1 - scheduler.alpha_bars[t]).view(-1, 1, 1, 1)
 
@@ -53,7 +53,8 @@ def setup_input_inference(device, R_t, A_seq, C, temporal_encoder): # Set up inp
 
 
 def bicubic_A_seq(list_frames): # Bicubically interpolate the list of frame to pass in the diffusion UNet
-    B, T, C, H, W = list_frames[0].shape
+
+    B, T, C, H, W = list_frames[0].shape        # It's (B, 1, 1, H, W)
 
     # Change the shape to feed the interpolater
     frames_up = [frame.view(B * T, C, H, W) for frame in list_frames] 
@@ -64,53 +65,38 @@ def bicubic_A_seq(list_frames): # Bicubically interpolate the list of frame to p
 
     return frames_up
 
-
+# Apply conservative regridding between the prediction and the LR input
+# The conservative regridding can be done either at the scale of the patch or the frame. 
+# One must know applying regridding at the patch's scale might provide square artifacts
 def apply_conservative_regridding_final_output(B_pred, LR_input, spatial_factor, temp_factor, hard_constraint_mass):
 
+    strategy, f = hard_constraint_mass      # Scale (image or patch) and function f
 
     # This function apply conservative regridding for one block (temp_factor * spatial_factor * spatial_factor) VS low res pixel
     # x_block is (B, N, C*k*k) where C = temp_factor, y_pixel is (B, N, 1). We should perform the transformation for every B & N 
     # output should be the modified x_block (B, N, C*k*k)
-    def apply_conservative_strategy_block(x_block, y_pixel): 
-        if hard_constraint_mass == "additive":
+    def apply_conservative_strategy_one_patch(x_block, y_pixel): 
 
-            # Choose the mass reference. It should be low res (time & space). Here we take the last input 
-            P_LR = y_pixel * temp_factor  # Shape (B', 1, 1, 1, 1)
+        strategy, f = hard_constraint_mass
 
-            # Compute the sum at the denominator
-            sum = x_block.sum(dim=(2), keepdim=True) / (spatial_factor ** 2)  # shape: (B, N, 1)
+        f_output = f(x_block)  # shape: (B, N, C*k*k)
 
+        # Compute the mass reference
+        P_LR = y_pixel * temp_factor   # (B, N, 1)
 
-            # Compute the final (constrained) outputs
-            output_final = x_block + (P_LR - sum) * ((spatial_factor / 100)**2) / temp_factor  # shape: (B, N, C*k*k)
+        # Compute the sum at the denominator for the current predictions
+        sum_f = f_output.sum(dim=(2), keepdim=True) / (spatial_factor ** 2)  #  (B, N, 1)
 
-            return output_final
+        # Compute the final (constrained) predictions
+        output_final = f_output * (P_LR / sum_f)   # shape: (B, N, C*k*k)
 
-        try:
-            if hard_constraint_mass[0] == "multiplicative": # Multiplicative strategy
-                strategy, f = hard_constraint_mass
-
-                f_output = f(x_block)  # shape: (B, N, C*k*k)
-
-                # Compute the mass reference
-                P_LR = y_pixel * temp_factor   # (B, N, 1)
-
-                # Compute the sum at the denominator for the current predictions
-                sum_f = f_output.sum(dim=(2), keepdim=True) / (spatial_factor ** 2)  #  (B, N, 1)
-
-                # Compute the final (constrained) predictions
-                output_final = f_output * (P_LR / sum_f)   # shape: (B, N, C*k*k)
-
-                return output_final
-        
-        except:
-            return x_block
+        return output_final
 
 
-    # Apply conservative reggriding LR pixel wise for the whole frame
+    # Apply conservative reggriding LR pixel wise for the whole frame at the patch scale
     # Prediction is (B, C, H, W), LR last frame is (B, H', W') where C = temp_factor
     # Returns modified predictions of shape (B, C, H, W)
-    def apply_conservative_strategy_whole_frames(prediction, last_frame):
+    def apply_conservative_strategy_patch_scale(prediction, last_frame):
         B, C, H, W = prediction.shape
 
         B, H_p, W_p = last_frame.shape
@@ -123,15 +109,45 @@ def apply_conservative_regridding_final_output(B_pred, LR_input, spatial_factor,
         Y_vals = last_frame.view(B, H_p * W_p, 1)        # (B, N, 1). Low res input 
 
         # Apply treatment by blocks
-        X_patches_mod = apply_conservative_strategy_block(X_patches, Y_vals)  # (B, N, C*k*k)
+        X_patches_mod = apply_conservative_strategy_one_patch(X_patches, Y_vals)  # (B, N, C*k*k)
 
         # Resize to fit the expected shape
         X_patches_mod = X_patches_mod.transpose(1, 2)  # (B, C*k*k, N)
         X_out = F.fold(X_patches_mod, output_size=(H, W), kernel_size=spatial_factor, stride=spatial_factor) # (B, C, H, W)
 
         return X_out
+
+
+    # Apply conservative reggriding at the frame scale
+    # Prediction is (B, C, H, W), LR last frame is (B, H', W') where C = temp_factor
+    # Returns modified predictions of shape (B, C, H, W)
+    def apply_conservative_strategy_frame_scale(prediction, last_frame):
+        strategy, f = hard_constraint_mass
+
+        f_output = f(prediction)  # shape: (B, C, H, W)
+
+        # Compute the mass reference
+        P_LR = last_frame   # (B, H', W')
+        P_LR = P_LR.sum(dim = (1, 2))       # (B)
+
+        # Compute the sum at the denominator for the current predictions
+        sum_f = f_output.sum(dim=(2, 3)) / (spatial_factor ** 2)  #  (B, C)
+
+        # Make everything homogenous
+        P_LR = P_LR.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
+        sum_f = sum_f.unsqueeze(2).unsqueeze(3)        # (B, C, 1, 1)
+
+        # Compute the final (constrained) predictions
+        output_final = f_output * (P_LR / sum_f)   # shape: (B, C, H, W)
+
+        return output_final
     
     LR_input = LR_input.squeeze()
-    final_output = apply_conservative_strategy_whole_frames(prediction = B_pred, last_frame= LR_input)
+
+    if strategy == "image-scale":
+        final_output = apply_conservative_strategy_frame_scale(B_pred, LR_input)
+
+    if strategy == "patch-scale":
+        final_output = apply_conservative_strategy_patch_scale(B_pred, LR_input)
 
     return final_output

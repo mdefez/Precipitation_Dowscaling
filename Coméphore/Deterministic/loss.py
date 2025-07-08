@@ -3,8 +3,17 @@
 import torch 
 import torch.nn as nn
 import numpy as np
+import os
 from scipy.stats import wasserstein_distance
 import copy
+import matplotlib.pyplot as plt
+from torchmetrics.functional import structural_similarity_index_measure as ssim_f
+
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Importing `spectral_angle_mapper` from `torchmetrics.functional` was deprecated"
+)
 
 class CustomLossTrain(nn.Module):
     def __init__(self, base_loss, conservative = False, lambda_conservative = 0.1, lambda_covariance = 0.1, covariance = False):
@@ -169,7 +178,6 @@ class Log_spectral_distance(nn.Module):
     def forward(self, predictions, targets, bins=128, epsilon=1e-8):     # output and target are (B, C, H, W)
 
         B, C, H, W = predictions.shape
-        device = predictions.device
 
         # Compute FFT magnitude
         fft_pred = torch.fft.fftshift(torch.fft.fft2(predictions, dim=(-2, -1)), dim=(-2, -1))      #  (B, C, H, W), complex
@@ -212,19 +220,19 @@ class EarthMovingDistance(nn.Module):
     def forward(self, predictions, targets):        # output and target are (B, C, H, W)
 
         B, C, H, W = predictions.shape
-        device = predictions.device
+        device = predictions.device 
 
         pred_norm = self.normalize_images(predictions)  # (B, C, H*W)
         target_norm = self.normalize_images(targets)  # (B, C, H*W)
 
         y, x = torch.meshgrid(torch.arange(H, device="cpu"), torch.arange(W, device="cpu"), indexing='ij')        # y, x: (H, W)
         
-        # We need the coords to identify the "ground" and the associated distances between pixel (trivial in our case)
+        # We need the coords to identify the "ground" and the associated distances between pixel
         coords = torch.stack([x.flatten(), y.flatten()], dim=1).float()  # (H*W, 2)
 
         emd_vals = torch.zeros((B, C), device="cpu")  # (B, C)
 
-        # unfortunately we must use loops because the function only runs with 1D-histogram (and not tensors)
+        # Loop because the function doesn't handle tensors
         for b in range(B):
             for c in range(C):
                 p_dist = pred_norm[b, c].to("cpu")  # (H*W,)
@@ -234,6 +242,132 @@ class EarthMovingDistance(nn.Module):
         mean_emd = emd_vals.mean()  # scalar, mean over batch & channels
 
         return mean_emd     # scalar
+
+
+
+# Compute SSIM (to evaluate the "realism" of the image) depending on the structure
+# This metric should be computed for each frame (H, W) so we iterate over the batch and the channels then average over it   
+# Between 0 and 1 (theoritically it could go to -1 for anticorrelation). 1 is the best 
+class SSIM(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred, target):    # output and target are (B, C, H, W)
+
+        B, C, H, W = pred.shape
+
+        # Flatten time dimension: (B*C, 1, H, W)
+        pred_flat = pred.reshape(B * C, 1, H, W)
+        target_flat = target.reshape(B * C, 1, H, W)
+
+        # Compute SSIM for each grayscale image
+        ssim_vals = ssim_f(
+            pred_flat,
+            target_flat,
+            data_range=1,
+            gaussian_kernel=True,
+            sigma=1.5,
+            kernel_size=11,
+            reduction="none",  # returns tensor of shape (B*C,)
+        )
+
+        return ssim_vals.mean()
+    
+
+
+# Compute the rank histogram and the associated deviation 
+# We compute a rank histogram for each image (channel). One can eventually plot it 
+class PITD(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    # Compute (and eventually plot) the rank histogram for one image. The "real" forward is below.
+    def compute_rank_histogram(self, output, target, bins=None, plot_histo = False, plot_path = None):      # output and target are (H, W)
+
+        # Flatten the arrays
+        pred_values = np.ravel(output.cpu().detach().numpy())
+        target_values = np.ravel(target.cpu().detach().numpy())
+
+        # Sort prediction values once
+        pred_sorted = np.sort(pred_values)
+        
+        # Compute ranks
+        ranks = np.searchsorted(pred_sorted, target_values, side="right")
+
+        # By default, bins = N_pred + 1
+        if bins is None:
+            bins = len(pred_sorted) + 1
+
+        # Histogram counts
+        counts, bin_edges = np.histogram(ranks, bins=bins)
+        expected_freq = 1 / bins
+
+        # Plot histogram
+        if plot_histo:
+            plt.figure(figsize=(8, 5))
+            plt.bar(
+                range(bins),
+                counts / counts.sum(),
+                width=1,
+                edgecolor="black",
+                align="center"
+            )
+            plt.axhline(y=expected_freq, color="red", linestyle="--", linewidth=2, label="Expected Uniform Frequency")
+            plt.xlabel("Rank Bin")
+            plt.ylabel("Relative Frequency")
+            plt.title("Rank Histogram")
+            plt.savefig(plot_path)
+
+        # Computes the deviation
+        K = bins
+        N = counts.sum()
+        expected = 1 / K
+        pitd = np.sqrt(np.mean((counts / N - expected) ** 2))
+
+        return pitd
+    
+    # Plot every channel's histograms for one sample of the batch
+    # The sample is choosen so that it is non null and contains significant amount of precipitation
+    def plot_channels(self, output, target, plot_path, bins = 10):     # Output & target are (B, C, H, W)
+        B, C, H, W = output.shape
+        os.makedirs(plot_path, exist_ok=True)
+
+        for b in range(B):
+            local_frame = output[b, :, :, :]
+
+            if local_frame.mean() > 0.1:        # Significant amount of precipitation
+                for c in range(C):
+                    local_output = output[b, c, :, :]
+                    local_target = target[b, c, :, :]
+                    local_plot_path = plot_path + f"timestep_{c}.png"
+                    self.compute_rank_histogram(output = local_output,
+                                                            target = local_target,
+                                                            plot_histo = True,
+                                                            bins=bins,
+                                                            plot_path=local_plot_path)
+                    
+                break
+                        
+                
+
+    
+    # Compute the PITD for each batch and channel then average it 
+    def forward(self, pred, target):    # output and target are (B, C, H, W)
+
+        B, C, H, W = pred.shape
+
+        mean_pitd = 0
+        for b in range(B):
+            for c in range(C):
+                output = pred[b, c, :, :]
+                local_target = target[b, c, :, :]
+                mean_pitd += self.compute_rank_histogram(output = output,
+                                                        target = local_target,
+                                                        plot_histo = False)
+                
+        mean_pitd = mean_pitd / (B*C)
+
+        return mean_pitd
 
 
 

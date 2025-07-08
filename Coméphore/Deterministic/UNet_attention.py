@@ -308,10 +308,10 @@ class UNet_with_attention(nn.Module):
     
 
 
-    # Apply conservative reggriding LR pixel wise for the whole frame
+    # Apply conservative reggriding LR patch wise for the whole frame
     # Prediction is (B, C, H, W), last frame is (B, 1, 1, H', W') where C = temp_factor
     # Returns modified predictions of shape (B, C, H, W)
-    def apply_conservative_strategy_whole_frames(self, prediction, last_frame):
+    def apply_conservative_strategy_patch_scale(self, prediction, last_frame):
         B, C, H, W = prediction.shape
 
         _, _, _, H_p, W_p = last_frame.shape
@@ -324,7 +324,7 @@ class UNet_with_attention(nn.Module):
         Y_vals = last_frame.view(B, 1, H_p * W_p).transpose(1, 2)  # (B, N, 1)
 
         # Apply treatment by blocks
-        X_patches_mod = self.apply_conservative_strategy_block(X_patches, Y_vals)  # (B, N, C*k*k)
+        X_patches_mod = self.apply_conservative_strategy_one_patch(X_patches, Y_vals)  # (B, N, C*k*k)
 
         # Resize to fit the expected shape
         X_patches_mod = X_patches_mod.transpose(1, 2)  # (B, C*k*k, N)
@@ -333,49 +333,56 @@ class UNet_with_attention(nn.Module):
         return X_out
 
 
-    # This function apply conservative regridding for one block (temp_factor * spatial_factor * spatial_factor) VS low res pixel
+    # This function apply conservative regridding for one patch (temp_factor * spatial_factor * spatial_factor) VS low res pixel
     # x_block is (B, N, C*k*k) where C = temp_factor, y_pixel is (B, N, 1). We should perform the transformation for every B & N 
     # output should be the modified x_block (B, N, C*k*k)
-    def apply_conservative_strategy_block(self, x_block, y_pixel): 
-        if self.hard_constraint_mass == "additive":
+    def apply_conservative_strategy_one_patch(self, x_block, y_pixel): 
 
-            # Choose the mass reference. It should be low res (time & space). Here we take the last input 
-            P_LR = y_pixel * self.temp_factor  # Shape (B', 1, 1, 1, 1)
+        strategy, f = self.hard_constraint_mass
 
-            # Compute the sum at the denominator
-            sum = x_block.sum(dim=(2), keepdim=True) / (self.spatial_factor ** 2)  # shape: (B, N, 1)
+        f_output = f(x_block)  # shape: (B, N, C*k*k)
+
+        # Compute the mass reference
+        P_LR = y_pixel * self.temp_factor   # (B, N, 1)
+
+        # Compute the sum at the denominator for the current predictions
+        sum_f = f_output.sum(dim=(2), keepdim=True) / (self.spatial_factor ** 2)  #  (B, N, 1)
+
+        # Compute the final (constrained) predictions
+        output_final = f_output * (P_LR / sum_f)   # shape: (B, N, C*k*k)
+
+        return output_final
 
 
-            # Compute the final (constrained) outputs
-            output_final = x_block + (P_LR - sum) * ((self.spatial_factor / 100)**2) / self.temp_factor  # shape: (B, N, C*k*k)
+    # Apply conservative reggriding LR pixel wise for the whole frame at the frame scale
+    # Prediction is (B, C, H, W), last frame is (B, 1, 1, H', W') where C = temp_factor
+    # Returns modified predictions of shape (B, C, H, W)
+    def apply_conservative_strategy_frame_scale(self, prediction, last_frame):
+        strategy, f = self.hard_constraint_mass
 
-            return output_final
+        f_output = f(prediction)  # shape: (B, C, H, W)
 
-        try:
-            if self.hard_constraint_mass[0] == "multiplicative": # Multiplicative strategy
-                strategy, f = self.hard_constraint_mass
+        # Compute the mass reference
+        P_LR = last_frame.squeeze(2).squeeze(1)   # (B, H', W')
+        P_LR = P_LR.sum(dim = (1, 2))       # (B)
 
-                f_output = f(x_block)  # shape: (B, N, C*k*k)
+        # Compute the sum at the denominator for the current predictions
+        sum_f = f_output.sum(dim=(2, 3)) / (self.spatial_factor ** 2)  #  (B, C)
 
-                # Compute the mass reference
-                P_LR = y_pixel * self.temp_factor   # (B, N, 1)
+        # Make everything homogenous
+        P_LR = P_LR.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
+        sum_f = sum_f.unsqueeze(2).unsqueeze(3)        # (B, C, 1, 1)
 
-                # Compute the sum at the denominator for the current predictions
-                sum_f = f_output.sum(dim=(2), keepdim=True) / (self.spatial_factor ** 2)  #  (B, N, 1)
+        # Compute the final (constrained) predictions
+        output_final = f_output * (P_LR / sum_f)   # shape: (B, C, H, W)
 
-                # Compute the final (constrained) predictions
-                output_final = f_output * (P_LR / sum_f)   # shape: (B, N, C*k*k)
-
-                return output_final
-        
-        except:
-            return x_block
-
+        return output_final
 
 
     def forward(self, frames, dem, apply_constraint): # frames is a list of coarse inputs, dem is the dem associated to the tile
 
         # frames = [frame_0, ..., frame_-1] where frame = (B, 1, 1, H, W) & dem = (B, 1, 100, 100)
+        strategy, f = self.hard_constraint_mass
 
         ### FIRST STEP
         # Before anything, if the last image (we seek to downsample) is all zeroes, then we force the predictions to be zero. Otherwise, we pass it to the unet
@@ -418,7 +425,12 @@ class UNet_with_attention(nn.Module):
             ### THIRD STEP
             # Here we apply (if asked) the hard constraint mass strategy
             if apply_constraint == True:
-                output_non_null = self.apply_conservative_strategy_whole_frames(prediction=output_non_null,
+                if strategy == "patch-scale":
+                    output_non_null = self.apply_conservative_strategy_patch_scale(prediction=output_non_null,
+                                                            last_frame=frames_non_null[-1])       # [B', self.temp_factor, H, W]
+                    
+                if strategy == "image-scale":
+                    output_non_null = self.apply_conservative_strategy_frame_scale(prediction=output_non_null,
                                                             last_frame=frames_non_null[-1])       # [B', self.temp_factor, H, W]
 
             # Setting the outputs
