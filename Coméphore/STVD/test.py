@@ -318,8 +318,9 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
     with torch.no_grad():
 
-        crps = 0                # Initialize the CRPS value
-        ploted_pitd = False     # Keep track of the PITD plot, we plot it only once
+        crps = 0                        # Initialize the CRPS value
+        PITD_metric = 0
+        ploted_sample_pitd = False      # Keep track of the sample PITD plot, we plot it only once for one sample
 
         # Loop over the testing set
         for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
@@ -347,17 +348,18 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
             # We compute every loss for a random scenario (the first, so that it works when we have only one scenario)
             test_loss = criterion(B_pred[0], target) 
 
-            # Plot PIT and compute PITD (only for the first sample of the first batch)
-            if ploted_pitd == False:
-                PITD().plot_channels(output = B_pred[0], target = target, 
+            # Plot PIT and compute marginals PITD (only for the first batch)
+            if ploted_sample_pitd == False:
+                PITD().plot_channels(list_output = B_pred, target = target, 
                                plot_path = f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}/PITD/")
-                ploted_pitd = True
+                ploted_sample_pitd = True
 
-            # Compute CRPS (only if we use a probabilistic approach ie the diffusion model)
-            # We compute it only for the first batch, the following ones have only one scenario
+            # Compute CRPS & PITD (only if we use a probabilistic approach ie the diffusion model)
             if use_diffusion:   
-                if crps == 0:      
-                    crps += criterion.crps(B_pred, target, lambda x: x)         # Compute the mean CRPS over the batch, the function sets the weights in the CRPS formula
+                crps += criterion.crps(B_pred, target, lambda x: x)         # Compute the mean CRPS over the batch, the function sets the weights in the CRPS formula
+                PITD_metric += criterion.PITD_loss(B_pred, target)                 # Compute the mean PITD over the batch. Read loss.py for more details
+            
+            
             loss_vector = criterion.forward_vecteur(B_pred[0], target)          # Compute the marginal loss only for the main metric
 
             # Update the test loss
@@ -370,7 +372,6 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
             if plot_first_samples == True:
                 save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, delta = delta, multiple_scenarios = True)
                 plot_first_samples = False
-                n_scenarios = 1
 
             ### Keep track of the best/wors samples ###
             # Fill the list with the first 5 values
@@ -442,8 +443,11 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
     # Print the metrics
     avg_test_loss = total_test_loss / len(test_loader)
+    crps = crps / len(test_loader)
+    PITD_metric = PITD_metric / len(test_loader)
     print(f"Test Loss: {avg_test_loss} for the following metrics \n{criterion.name_metric}")
     if use_diffusion:
-        print(f"CRPS = {crps}")
+        print(f"Mean CRPS = {crps}")
+        print(f"Mean PITD = {PITD_metric}")
 
 

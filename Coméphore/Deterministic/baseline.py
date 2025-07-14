@@ -26,6 +26,9 @@ class bicubic(nn.Module):
         frames_sr = torch.stack(frames_sr, dim=0)       # Concatenate the frames into a (self.temp_factor, B, H, W) tensor
         frames_sr = frames_sr.permute(1, 0, 2, 3)       # (B, self.temp_factor, H, W) 
 
+        # Make it non-negative
+        frames_sr = torch.clamp(frames_sr, min=0)
+
         return frames_sr
     
 # Input is a list of length = n_inputs and item = (B, 1, 1, H, W) low res

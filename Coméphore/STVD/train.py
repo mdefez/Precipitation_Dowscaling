@@ -32,7 +32,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Train the model and returns the average loss & the weights
 def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
-          temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion, use_diffusion,
+          temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion, use_diffusion, patience_treshold,
           testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
 
 
@@ -233,7 +233,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 patience_counter += 1
 
             # Early stop if no significant improve for too many validating epochs
-            patience_treshold = 7       # Set to None if one doesn't want any early stopping
             if patience_treshold != None and patience_counter >= patience_treshold:
                 print(f"Early stopping at epoch {epoch}")
                 return best_weights_deter, best_weights_diffusion, best_loss

@@ -29,7 +29,7 @@ def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps, la
         reversed(range(num_steps)),
         desc="Sampling",
         total=num_steps,
-        leave=True,
+        leave=True,        
         ncols=100,
         file=sys.stdout):
             t = torch.full((B,), t_step, device=device, dtype=torch.long).to(device) # (B) tensor filled with t_step

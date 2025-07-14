@@ -37,16 +37,18 @@ if torch.cuda.is_available():
 # Super resolution factors
 temp_factor = 3
 spatial_factor = 10
-n_inputs = 4       # Ordered frames to take into account as input, the last one is the image to downscale
-delta = False        # If we want to predict deltas instead of real frames (except for the first one)
 
-n_scenarios = 4     # Number of scenarios to compute
+patience_threshold = 5      # Early training, triggers if there is no improvement for patience_threshold validating epochs
+n_inputs = 1                # Ordered frames to take into account as input, the last one is the image to downscale
+delta = False               # If we want to predict deltas instead of real frames (except for the first one)
+
+n_scenarios = 1     # Number of scenarios to compute
 
 n_days_train = 28       # Only first n_days are used for each month. Set this to an integer between 2 and 28
-n_days_test = 28        # Same for n_test. 
+n_days_test = 2        # Same for n_test. 
 
 # Choose wether we want to train/test/both and normalize
-training = True 
+training = False 
 normalizing = False         # If False, the code will import the last normalizer saved
 testing = True 
 
@@ -82,7 +84,7 @@ treshold_constraint_deter = 20 # Epoch where we should begin to apply conservati
 
 # Attention parameters
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
-strat_attention = ["time", "space"]
+strat_attention = [None]
 
 nb_heads = 4        # Number of attention heads used during the MHA (both for time & space)
 window_size = 3     # window size for spatial attention
@@ -100,12 +102,12 @@ dir_weights_deter = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitatio
 dir_weights_deter = None
 
 # Choice of the model and parameters
-model_deter = "UNet_with_attention" 
+model_deter = "bicubic" 
 model_deter_parameters = (("image-scale", f_mass), n_inputs, strat_attention, nb_heads, window_size, mse_deter, dir_weights_deter)
-
+model_deter_parameters = [None]
 
 ##### Diffusion model #####
-use_diffusion = True        # If we want to use diffusion or only the deterministic approach
+use_diffusion = False        # If we want to use diffusion or only the deterministic approach
 
 nb_steps = 1000                         # Number of denoising steps
 beta = (1e-4, 0.02, "quadratic")       # beta_start, beta_end, linear/quadratic
@@ -121,10 +123,10 @@ base_loss = nn.MSELoss       # Loss function computed over velocity or noise. It
 # To define specific names for the metrics. All those custom losses are written in Deterministic/loss.py
 name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE",
              Log_spectral_distance : "Log-spectral distance", EarthMovingDistance : "Earth-Moving Distance",
-             SSIM : "SSIM", PITD : "PITD"}
+             SSIM : "SSIM"}
 
 # Metric (used for testing)
-metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss, Log_spectral_distance, EarthMovingDistance, SSIM, PITD]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
+metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss, Log_spectral_distance, EarthMovingDistance, SSIM]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
 name_metric = [name_loss[metric] for metric in metric_test]     # Name of the metrics
 df_metric = pd.DataFrame({"Name" : name_metric, "Metric" : metric_test})
 
@@ -202,7 +204,7 @@ if training:
                                                                          spatial_factor = spatial_factor, model = model_deter, 
                                                                          model_parameters = model_deter_parameters, treshold_constraint_deter = treshold_constraint_deter,
                                                                          n_input = n_inputs, use_diffusion = use_diffusion,
-                                                                         model_parameters_diffusion = model_parameters_diffusion)
+                                                                         model_parameters_diffusion = model_parameters_diffusion, patience_threshold = patience_threshold)
 
     # Save the best model & the associated normalization
     if model_deter == "UNet_with_attention":

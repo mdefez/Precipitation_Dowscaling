@@ -8,6 +8,7 @@ from scipy.stats import wasserstein_distance
 import copy
 import matplotlib.pyplot as plt
 from torchmetrics.functional import structural_similarity_index_measure as ssim_f
+import pandas as pd
 
 import warnings
 warnings.filterwarnings(
@@ -112,6 +113,10 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
         term2 = torch.mean(torch.abs(diff), dim=(0,1))  # [B]
 
         return (term1 - 0.5 * term2).mean()         # mean over the batch
+    
+
+    def PITD_loss(self, list_output, target):            # Compute the mean PITD over the batch (each PITD is computed for the aggregated distribution of the videos & timesteps)
+        return PITD().forward(list_output, target)
 
     
 
@@ -275,97 +280,113 @@ class SSIM(nn.Module):
     
 
 
-# Compute the rank histogram and the associated deviation 
-# We compute a rank histogram for each image (channel). One can eventually plot it 
+# Compute the rank histogram and the deviation between predictions / target (that should follow a uniform distribution over [0, 1])
+# We compute a rank histogram whose base is the data of all the samples (all the timesteps & all the generated videos). One can eventually plot it 
 class PITD(nn.Module):
     def __init__(self):
         super().__init__()
 
-    # Compute (and eventually plot) the rank histogram for one image. The "real" forward is below.
-    def compute_rank_histogram(self, output, target, bins=None, plot_histo = False, plot_path = None):      # output and target are (H, W)
+    # Compute (and eventually plot) the rank histogram for a list of images (C, H, W). The "real" forward is below.
+    def compute_rank_histogram(self, list_output, target, plot_histo = False, plot_path = None):      # list_output is a list of predictions (C, H, W). Target is (C, H, W)
 
-        # Flatten the arrays
+        # Concatenate the predictions and flatten into array
+        output = torch.cat(list_output, dim=0)                  # (n_scenarios * C, H, W)
         pred_values = np.ravel(output.cpu().detach().numpy())
         target_values = np.ravel(target.cpu().detach().numpy())
 
         # Sort prediction values once
         pred_sorted = np.sort(pred_values)
-        
-        # Compute ranks
-        ranks = np.searchsorted(pred_sorted, target_values, side="right")
 
-        # By default, bins = N_pred + 1
-        if bins is None:
-            bins = len(pred_sorted) + 1
+        # Compute CDF values: F_X(y) = P(X ≤ y) & F_x_x. In theory, F_X_X should be U[0, 1] but there are some exceptions, thus we prefer to compute the deviation on the "true" F_X_X and not U[0, 1]
+        F_X_Y = np.searchsorted(pred_sorted, target_values, side='right') / len(pred_sorted)
+        F_X_X = np.searchsorted(pred_sorted, pred_sorted, side='right') / len(pred_sorted)
 
-        # Histogram counts
-        counts, bin_edges = np.histogram(ranks, bins=bins)
-        expected_freq = 1 / bins
+        # If the target frames are completely null, then the output is null as well and the predictions are perfect
+        if target_values.max() == 0:
+            return 0
 
+        # Compute histogram. Get the pre-computed quantiles from the WHOLE training set
+        df = pd.read_csv("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Data_analysis/8_quantiles.csv")
+        quantiles = np.asarray(df["quantile"])                      # Quantiles of interest, computed from the training set
+
+        # Computes the normalized distribution for the specified quantiles (for the prediction and truth)
+        counts, bin_edges = np.histogram(F_X_Y, quantiles)
+        size_quantile = [(quantiles[k+1] - quantiles[k]) for k in range(len(counts))]
+        counts = counts / size_quantile    # takes into account the fact quantiles are not equally separated
+        frequency = counts / counts.sum()              # Make it a distribution as it sums up to 1
+
+        counts_pred, bin_edges = np.histogram(F_X_X, quantiles)
+        counts_pred = counts_pred / size_quantile                       # takes into account the fact quantiles are not equally separated
+        frequency_pred = counts_pred / counts_pred.sum()                # Make it a distribution as it sums up to 1
+
+        expected_frequency = 1 / len(counts)
         # Plot histogram
         if plot_histo:
             plt.figure(figsize=(8, 5))
-            plt.bar(
-                range(bins),
-                counts / counts.sum(),
-                width=1,
-                edgecolor="black",
-                align="center"
-            )
-            plt.axhline(y=expected_freq, color="red", linestyle="--", linewidth=2, label="Expected Uniform Frequency")
+
+            # Compute bin widths
+            bin_widths = np.diff(bin_edges)
+
+            # Compute bin centers for x axis
+            bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+            # Plot using bar for pred & target
+            plt.bar(bin_centers, frequency, width=bin_widths, alpha=0.5, color='g', label = "Target")
+            plt.bar(bin_centers, frequency_pred, width=bin_widths, alpha=0.5, color='b', label = "Predictions")
+            
+            # Plot the reference
+            plt.axhline(y = expected_frequency, linestyle="-", color = "r", label = "Uniform distribution")
+        
             plt.xlabel("Rank Bin")
             plt.ylabel("Relative Frequency")
             plt.title("Rank Histogram")
+            plt.legend()
             plt.savefig(plot_path)
 
         # Computes the deviation
-        K = bins
-        N = counts.sum()
-        expected = 1 / K
-        pitd = np.sqrt(np.mean((counts / N - expected) ** 2))
+        pitd = np.sqrt(np.sum(((frequency - frequency_pred) ** 2) * size_quantile))        # We multiple by size_quantile to take into account the fact the quantiles are not equally separated
 
         return pitd
     
-    # Plot every channel's histograms for one sample of the batch
-    # The sample is choosen so that it is non null and contains significant amount of precipitation
-    def plot_channels(self, output, target, plot_path, bins = 10):     # Output & target are (B, C, H, W)
-        B, C, H, W = output.shape
+    # Get the list of scenarios for only one sample out of the list of batch
+    def get_sample_from_batch(self, list_output, sample):
+        return [list_output[k][sample, :, :, :] for k in range(len(list_output))]
+    
+    # Plot n samples' histograms from the batch
+    def plot_channels(self, list_output, target, plot_path):     # list_output is a list of predictions (B, C, H, W). Target is (B, C, H, W)
+        B, C, H, W = target.shape
         os.makedirs(plot_path, exist_ok=True)
 
-        for b in range(B):
-            local_frame = output[b, :, :, :]
+        for b in range(min(15, B)):     # We don't plot more than 15 PIT
+            local_output = self.get_sample_from_batch(list_output, b)
+            local_target = target[b, :, :, :]
+            local_plot_path = plot_path + f"sample_{b}.png"
+            print(b)
+            self.compute_rank_histogram(list_output = local_output,
+                                                    target = local_target,
+                                                    plot_histo = True,
+                                                    plot_path=local_plot_path)
+            
+            plt.imshow(np.array(local_target[0, :, :]), cmap = "viridis", vmin = 0, vmax = 1)
+            plt.savefig(f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_10_temp_3/bicubic/bicubic_n_days_test_2/PITD/plot_{b}.png")
 
-            if local_frame.mean() > 0.1:        # Significant amount of precipitation
-                for c in range(C):
-                    local_output = output[b, c, :, :]
-                    local_target = target[b, c, :, :]
-                    local_plot_path = plot_path + f"timestep_{c}.png"
-                    self.compute_rank_histogram(output = local_output,
-                                                            target = local_target,
-                                                            plot_histo = True,
-                                                            bins=bins,
-                                                            plot_path=local_plot_path)
-                    
-                break
-                        
+                               
                 
+    # Compute the PITD for each sample then average it over the batch
+    def forward(self, list_output, target):    # list_output is a list of predictions (B, C, H, W). Target is (B, C, H, W)
 
-    
-    # Compute the PITD for each batch and channel then average it 
-    def forward(self, pred, target):    # output and target are (B, C, H, W)
-
-        B, C, H, W = pred.shape
+        B, C, H, W = target.shape
 
         mean_pitd = 0
         for b in range(B):
-            for c in range(C):
-                output = pred[b, c, :, :]
-                local_target = target[b, c, :, :]
-                mean_pitd += self.compute_rank_histogram(output = output,
-                                                        target = local_target,
-                                                        plot_histo = False)
+            local_output = self.get_sample_from_batch(list_output, b)
+            local_target = target[b, :, :, :]
+            mean_pitd += self.compute_rank_histogram(list_output = local_output,
+                                                    target = local_target,
+                                                    plot_histo = False)
+        
                 
-        mean_pitd = mean_pitd / (B*C)
+        mean_pitd = mean_pitd / B
 
         return mean_pitd
 

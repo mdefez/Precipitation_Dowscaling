@@ -4,3 +4,4 @@ DEM_open_topo/output_hh.tif
 *.pth
 wandb/
 Coméphore/STVD/Data_analysis/all_pixels.npy 
+Coméphore/STVD/Data_analysis/data_2023.npy
