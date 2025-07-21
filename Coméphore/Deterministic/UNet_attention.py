@@ -56,13 +56,16 @@ class TemporalAttention(nn.Module):
     def __init__(self, channels, num_heads):
         super().__init__()
         self.model = SelfAttentionBlock(channels = channels, num_heads = num_heads)
+        self.positional_encoding = PositionalEncoding(num_hiddens=channels)
 
     def forward(self, x):
         B, T, C, H, W = x.shape
         x = x.permute(0, 3, 4, 1, 2).contiguous()  # (B, H, W, T, C)
         x = x.view(B * H * W, T, C)  # (B*H*W, T, C), we compute attention for each B*H*W (pixel)
 
-        attn_output = self.model(x)     # (B*H*W, T, C)
+        x_positional_encoded = self.positional_encoding(x)      # Take the sequence order into account
+
+        attn_output = self.model(x_positional_encoded)     # (B*H*W, T, C)
         good_shape = attn_output.view(B, H, W, T, C).permute(0, 3, 4, 1, 2).contiguous()  # (B, T, C, H, W)
 
         return good_shape
@@ -105,6 +108,25 @@ class LocalSpatialAttention(nn.Module):
         return x  # (B, T, C, H, W)
 
 
+# This object allows to build a Positional Encoding Matrix to preserve the order within the tuple of tokens
+# We must specify max_len, the max number of tokens. We can set it to 15 given that it's the number of previous frames, usually set around 5.
+class PositionalEncoding(nn.Module):  
+    def __init__(self, num_hiddens, dropout=.1, max_len=15):      # num_hiddens is the dimension of the token's representation, in our case the number of channels
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+
+        # Compute once and for all the encoding matrix P (We don't put it in the forward because it's the same, this way we compute it once)
+        self.P = torch.zeros((1, max_len, num_hiddens))
+        X = torch.arange(max_len, dtype=torch.float32).reshape(
+            -1, 1) / torch.pow(10000, torch.arange(
+            0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
+        self.P[:, :, 0::2] = torch.sin(X)
+        self.P[:, :, 1::2] = torch.cos(X)
+
+    def forward(self, X):
+        # Additive approach
+        X = X + self.P[:, :X.shape[1], :].to(X.device)
+        return self.dropout(X)
 
 
 class UNet_with_attention(nn.Module):

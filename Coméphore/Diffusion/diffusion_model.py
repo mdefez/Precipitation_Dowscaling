@@ -68,6 +68,27 @@ class TimeEmbedding(nn.Module):
 
         return emb  # (B, dim), dim is the final dimension of the temporal vector
 
+
+# This object allows to build a Positional Encoding Matrix to preserve the order within the tuple of tokens
+# We must specify max_len, the max number of tokens. We can set it to 15 given that it's the number of previous frames, usually set around 5.
+class PositionalEncoding(nn.Module):  
+    def __init__(self, num_hiddens, dropout=.1, max_len=15):      # num_hiddens is the dimension of the token's representation, in our case the number of channels
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+
+        # Compute once and for all the encoding matrix P (We don't put it in the forward because it's the same, this way we compute it once)
+        self.P = torch.zeros((1, max_len, num_hiddens))
+        X = torch.arange(max_len, dtype=torch.float32).reshape(
+            -1, 1) / torch.pow(10000, torch.arange(
+            0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
+        self.P[:, :, 0::2] = torch.sin(X)
+        self.P[:, :, 1::2] = torch.cos(X)
+
+    def forward(self, X):
+        # Additive approach
+        X = X + self.P[:, :X.shape[1], :].to(X.device)
+        return self.dropout(X)
+
     
 # Usual way to compute temporal cross attention with multi attention heads 
 # The feature map pays attention to the temporal embedding
@@ -79,6 +100,7 @@ class CrossAttentionBlock(nn.Module):
         self.feature_dim = feature_dim
         self.n_heads = n_heads
         self.head_dim = embed_dim // n_heads
+        self.positional_encoder = PositionalEncoding(embed_dim)
 
         self.query_proj = nn.Linear(feature_dim, embed_dim)
         self.key_proj = nn.Linear(embed_dim, embed_dim)
@@ -88,9 +110,13 @@ class CrossAttentionBlock(nn.Module):
     def forward(self, feature_map, temporal_embedding):  # (B, C, H, W), (B, T, D)
         B, C, H, W = feature_map.shape
         feat = feature_map.view(B, C, -1).permute(0, 2, 1)  # (B, H*W, C)
+
+        # We take into account the order sequence of the temporal embedding 
+        temporal_embedding_encoded = self.positional_encoder(temporal_embedding)
+
         Q = self.query_proj(feat)  # (B, H*W, D)
-        K = self.key_proj(temporal_embedding)  # (B, T, D)
-        V = self.value_proj(temporal_embedding)  # (B, T, D)
+        K = self.key_proj(temporal_embedding_encoded)  # (B, T, D)
+        V = self.value_proj(temporal_embedding_encoded)  # (B, T, D)
 
         # Reshape for multi-head attention
         def reshape_for_heads(x):

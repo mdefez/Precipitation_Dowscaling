@@ -45,7 +45,7 @@ delta = False               # If we want to predict deltas instead of real frame
 n_scenarios = 5     # Number of scenarios to compute
 
 n_days_train = 28       # Only first n_days are used for each month. Set this to an integer between 2 and 28
-n_days_test = 2         # Same for n_test. 
+n_days_test = 28         # Same for n_test. 
 
 # Choose wether we want to train/test/both and normalize
 training = True 
@@ -55,7 +55,7 @@ testing = True
 cross_val = False           # If we want to perform cross validation or simple training/validating
 
 # Training features
-batch_size = 8 if spatial_factor <= 10 else 16
+batch_size = 4
 epochs = 120
 learning_rate = 1e-4
 
@@ -75,13 +75,13 @@ required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n
 ##### Attention parameters ##### Shared for both models (except the strategy)
 
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
-strat_attention_deter = ["time", "space"]
 strat_attention_diffu = ["time", "space"]
+strat_attention_deter = ["time", "space"]
 
 nb_heads = 4                        # Number of attention heads used during the MHA (both for time & space)
 window_size = [3, 3, 3, 1, 1]       # window size for spatial attention. Every element should be odd
 if "space" not in strat_attention_deter + strat_attention_diffu:
-    window_size = None
+    window_size = [None] * 5
 
 
 
@@ -91,7 +91,7 @@ available_strategy_mass = [None, ("a function type that operates on tensors", "i
 # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and it should not diverge when x is big
 # It is thus recommended to choose a polynomial with an epsilon for numerical stability
 def f_mass(x): 
-    return 1e-7 + x**2 
+    return 1e-7 + x**3 
 treshold_constraint_deter = 20 # Epoch where we should begin to apply conservative transformation for the deterministic model
 
 
@@ -118,7 +118,7 @@ model_deter_parameters = (("image-scale", f_mass), n_inputs, strat_attention_det
 use_diffusion = True        # If we want to use diffusion or only the deterministic approach
 
 nb_steps = 1000                         # Number of denoising steps
-beta = (1e-4, 0.02, "quadratic")       # beta_start, beta_end, linear/quadratic
+beta = (1e-3, 0.2, "quadratic")       # beta_start, beta_end, linear/quadratic
 
 conservative_mass_diffusion = ("image-scale", f_mass)     # Scale (image or patch -scale) + Function for the multiplicative approach
 
@@ -180,7 +180,7 @@ assert (strat_attention_deter in list_strat_attention) and (strat_attention_diff
 assert len(model_deter_parameters) == len(required_model_parameters[model_deter]), "Wrong number of model parameters filled"
 assert not (n_days_test == 1 or n_days_train == 1), "Training or Testing set is empty, don't set n_days to 1"
 assert not (training == True and (model_deter in ["nearest_neighbor", "bicubic"] and use_diffusion == False)), "You are trying to train an untrainable model"
-assert not ((model_deter in ["nearest_neighbor", "bicubic"] and use_diffusion == False) and n_inputs != 1), "You should not set n_inputs to more than 1 if you are using untrainable models"
+assert (n_inputs != 1 and "time" in strat_attention_deter+strat_attention_diffu) or n_inputs == 1, "You should not set n_inputs to more than 1 if you don't compute temporal attention"
 assert strat_dem in dict_strategies and strat_precip in dict_strategies, "You chose an unavailable scaling strategies"
 assert n_scenarios == 1 or use_diffusion == True, "You can't generate multiple scenarios if the model is deterministic"
 
