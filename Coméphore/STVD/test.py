@@ -22,6 +22,8 @@ import seaborn as sns
 import numpy as np
 from inference import sample_diffusion
 from tqdm import tqdm
+import pandas as pd
+import matplotlib.patches as patches
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -80,7 +82,7 @@ def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = Fals
             spine.set_linewidth(0.5)
             spine.set_visible(True)
 
-    plt.title(title)
+    plt.title(title, fontsize = 18)
 
 # Function to plot a precip histogram
 def plot_histo(pred, target, title, nb_slot, nb_column, position):
@@ -94,13 +96,86 @@ def plot_histo(pred, target, title, nb_slot, nb_column, position):
     flat_pred = pred.flatten()
     flat_target = target.flatten()
 
-    sns.kdeplot(flat_pred, color='steelblue', label='Prediction', clip=(0, 1), warn_singular=False)
-    sns.kdeplot(flat_target, color='orange', label='Target', clip=(0, 1), warn_singular=False)
-    plt.title(title)
+    sns.histplot(flat_pred, color='steelblue', label='Prediction', binrange=(0, 1), bins=30, stat='density', alpha =.5)
+    sns.histplot(flat_target, color='orange', label='Target', binrange=(0, 1), bins=30, stat='density', alpha = .5)
+    plt.title(title, fontsize = 18)
     plt.xlabel("Precipitation")
     plt.ylabel("Frequency")
     plt.legend()
     plt.show()
+
+
+# This functions takes a figure as input and adds custom legends at the left of the rows and bottom of the columns to make the plot more readable
+def plot_legend_row_columns(fig, num_scenarios, n_rows, num_channels, label_padding = 0.02):
+
+    # Column labels
+    n_cols = 1 + num_scenarios + 1 + 1  # Deterministic prediction + scenarios + target + histogram
+    column_labels = ["Deterministic prediction"]
+    for k in range(num_scenarios):
+        column_labels.append(f"Scenario {k+1}")
+    if num_scenarios >= 2:      # If we have multiple scenarios, we expect a variance plot
+        n_cols += 1
+        column_labels.append("Variance")
+    column_labels.append("Target")
+    column_labels.append("Target & Prediction distribution")
+
+    # Row labels 
+    row_labels = [f"Timestep {k}" for k in range(1, num_channels + 1)]
+    for k in range(n_rows - num_channels):
+        row_labels.insert(0, "Input")
+
+    axes = fig.get_axes()
+
+    # Add custom text at bottom of each column
+    begin_horizontal = (axes[0].get_position().x0 + axes[0].get_position().x1) / 2
+    horizontal_step = abs(axes[0].get_position().x0 - axes[2].get_position().x0)
+    for k in range(n_cols):
+        # place text centered under the bottom plot of each column
+        fig.text(
+            x= begin_horizontal + k*horizontal_step,
+            y=0.05,  # near bottom of figure
+            s=column_labels[k],
+            ha='center',
+            va='bottom',
+            fontsize = 22,
+            color = "#e12020"
+        )
+
+    # Add custom text to the left of each row
+    begin_vertical = (axes[0].get_position().y0 + axes[0].get_position().y1) / 2
+    vertical_step = abs(axes[0].get_position().y0 - axes[-1].get_position().y0) / (n_rows - 1)
+    for k in range(n_rows):
+        # place text vertically centered beside leftmost plot in the row
+        fig.text(
+            x=0.05,  # near left edge of figure
+            y=begin_vertical - k*vertical_step,
+            s=row_labels[k],
+            ha='left',
+            va='center',
+            rotation='vertical',
+            fontsize = 22,
+            color = "#e12020"
+        )
+
+    
+    # Add a bar to separate inputs from the rest
+    bar_y = begin_vertical - 0.42 * vertical_step
+    bar_height = 0.005  # height in figure coordinates
+
+    # Add rectangle across the whole figure
+    fig.patches.append(
+        patches.Rectangle(
+            (0, bar_y),  # (x, y) in figure coordinates
+            1.0,         # full figure width
+            bar_height,
+            transform=fig.transFigure,
+            color='black'
+        )
+    )
+
+
+
+
 
 
 # Function to plot all the relevant images of one batch and save them
@@ -114,7 +189,7 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
     
     # We don't plot more than 15 samples
     for i in range(min(15, len(prediction_deter))): 
-        if multiple_scenarios == True:
+        if best_worst == False:
             pred_img = []
             for k in range(len(predictions_final)):
                 pred_img.append(predictions_final[k][i].cpu().detach().numpy())                 # Final Predictions
@@ -139,12 +214,12 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         num_scenarios = len(pred_img)           # Number of different scenarios to compute
         num_channels = pred_img[0].shape[0]     # Temporal SR factor
 
-        # Number of horizontal slots (rws)
+        # Number of horizontal slots (columns)
         nb_columns = 1 + num_scenarios + 1 + 1       # Pred deter + n scenarios + target + histogram 
         if multiple_scenarios == True:
             nb_columns += 1                             # Variance
 
-        # Number of vertical slots (columns)
+        # Number of vertical slots (rows)
         nb_slots = num_channels + 1 + (len(list_input_plot))// nb_columns     # Input + DEM + temp_factor 
 
         plt.figure(figsize=(12 + 4 * nb_columns, 5 * num_channels))
@@ -153,7 +228,7 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         plot_img(dem_plot, "DEM", nb_slots, 1, "DEM", nb_column=nb_columns)
 
         for k in range(len(list_input_plot)):
-            plot_img(list_input_plot[k], True, nb_slots, 2+k, f"Frame {k} (Timestep {list_time[k]})", nb_column=nb_columns)
+            plot_img(list_input_plot[k], True, nb_slots, 2+k, f"Frame {k} \n (Timestep {list_time[k]})", nb_column=nb_columns)
 
         # Loop over the n timesteps
         for c in range(num_channels):
@@ -166,13 +241,13 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
 
             # Prediction of the deterministic model on the first column
             plot_img(pred_img_deter[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + count + 1, 
-                     f"Prediction (deterministic) - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+                     f"Prediction (deterministic) \n Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
             count += 1
 
             # Plot every scenarios
             for k in range(num_scenarios):
                 plot_img(pred_img[k][c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + count + 1 + k, 
-                        f"Final prediction - Timestep {c+1} - Scenario {k+1}", delta=new_scale, nb_column=nb_columns)
+                        f"Final prediction \n Timestep {c+1} - Scenario {k+1}", delta=new_scale, nb_column=nb_columns)
             count += 1
 
             # Plot the variance between scenarios
@@ -188,7 +263,7 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
                 else:
                     normalized_std = np.zeros_like(std)
                 plot_img(normalized_std, "variance", nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + count, 
-                            f"Variance between scenarios - Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
+                            f"Scenarios variance \n Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
                 count += 1
 
             # Plot target
@@ -205,6 +280,9 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
             count += 1
                            
 
+        # Make the plot more readable
+        fig = plt.gcf()  # Get current figure
+        plot_legend_row_columns(fig = fig, num_scenarios = num_scenarios, n_rows = nb_slots, num_channels = num_channels)
 
         # Save the plot
         # Design the name of the file
@@ -215,7 +293,8 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         else:
             name_file = f"Random/Random {i + 1} file"
 
-        plt.savefig(os.path.join(output_dir, f"{output_dir}/{name_file}.png"))
+
+        plt.savefig(os.path.join(output_dir, f"{output_dir}/{name_file}.png"), bbox_inches = "tight")
         plt.close()
 
 
@@ -259,12 +338,12 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
     # Load the diffusion model
     print("Loading diffusion model")
     in_channels = 2*(temp_factor) + 1
-    nb_steps, beta, conservative_mass_diffusion = model_parameters_diffusion
+    nb_steps, beta, conservative_mass_diffusion, nb_heads, window_size, strat_attention_diffu = model_parameters_diffusion
 
     if use_diffusion:
         # Load the model
         model_diffu = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128, temp_factor = temp_factor, 
-                                    spatial_factor = spatial_factor)
+                                    spatial_factor = spatial_factor, window_size = window_size, nb_heads = nb_heads, strat_attention = strat_attention_diffu)
         model_diffu = load_model(model_diffu, filepath_diffu)  
         model_diffu.to(device)
 
@@ -312,6 +391,43 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         l2_sorted = [l2[i] for i in idx]
 
         return l1_sorted, l2_sorted
+    
+    # Compute the average PITD from the dictionnary and plot it
+    def average_PITD(dict_pdf, plot_path):
+        # Convert the dictionnary of quantiles to a 2D array
+        values = np.array(list(dict_pdf.values()))  # shape: (num_lists, list_length)
+
+        # Compute the mean across rows (i.e., average per index)
+        average_array = np.mean(values, axis=0)
+
+        # Get the quantiles
+        df = pd.read_csv("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Data_analysis/8_quantiles.csv")
+        quantiles = np.asarray(df["quantile"])                      # Quantiles of interest, computed from the training set
+
+        plt.figure(figsize=(8, 5))
+
+        # Compute bin widths
+        bin_widths = np.diff(quantiles)
+
+        # Compute bin centers for x axis
+        bin_centers = 0.5 * (quantiles[:-1] + quantiles[1:])
+
+        # Plot using bar for pred & target
+        plt.bar(bin_centers, average_array, width=bin_widths, alpha=0.5, color='g', label = "Average PITD")
+        
+        # Plot the reference
+        expected_frequency = 1 / len(quantiles)
+        plt.axhline(y = expected_frequency, linestyle="-", color = "r", label = "Uniform distribution")
+    
+        plt.xlabel("Rank Bin")
+        plt.ylabel("Relative Frequency")
+        plt.title("Rank Histogram")
+        plt.legend()
+        plt.savefig(plot_path)
+
+        # Test
+        size_quantile = [(quantiles[k+1] - quantiles[k]) for k in range(len(average_array))]
+        pitd = np.sqrt(np.sum(((average_array - expected_frequency) ** 2) * size_quantile))
 
     plot_first_samples = True   # If one want to plot random samples
     best_worst_to_plot = 10     # Number of best / worst samples to plot
@@ -320,7 +436,10 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
         crps = 0                        # Initialize the CRPS value
         PITD_metric = 0
-        ploted_sample_pitd = False      # Keep track of the sample PITD plot, we plot it only once for one sample
+        ploted_sample_pitd = False      # Keep track of the sample PITD plot, we plot them only for the first batch
+        dict_pdf = {}                   # This dictionnary stores the values of the pdf (of each sample) that helps building each PIT plot. The goal is to compute an "average" PIT for the whole dataset and evaluate the model calibration
+
+        multiple_scenarios = True if n_scenarios >=2 else False
 
         # Loop over the testing set
         for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
@@ -355,10 +474,10 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
                 ploted_sample_pitd = True
 
             # Compute CRPS & PITD (only if we use a probabilistic approach ie the diffusion model)
+            PITD_marginal, dict_pdf = criterion.PITD_loss(B_pred, target, dict_pdf, time_idx)                 # Compute the mean PITD over the batch. Read loss.py for more details
+            PITD_metric += PITD_marginal
             if use_diffusion:   
                 crps += criterion.crps(B_pred, target, lambda x: x)         # Compute the mean CRPS over the batch, the function sets the weights in the CRPS formula
-                PITD_metric += criterion.PITD_loss(B_pred, target)                 # Compute the mean PITD over the batch. Read loss.py for more details
-            
             
             loss_vector = criterion.forward_vecteur(B_pred[0], target)          # Compute the marginal loss only for the main metric
 
@@ -370,7 +489,8 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
             # Plot some random predictions only for the first batch
             if plot_first_samples == True:
-                save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, delta = delta, multiple_scenarios = True)
+                save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, 
+                            delta = delta, multiple_scenarios = multiple_scenarios, best_worst = False)
                 plot_first_samples = False
 
             ### Keep track of the best/wors samples ###
@@ -445,9 +565,14 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
     avg_test_loss = total_test_loss / len(test_loader)
     crps = crps / len(test_loader)
     PITD_metric = PITD_metric / len(test_loader)
+
+    # Plot the average PITD
+    average_PITD(dict_pdf, f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}/PITD/average.png")
+
     print(f"Test Loss: {avg_test_loss} for the following metrics \n{criterion.name_metric}")
+    print(f"Mean PITD = {PITD_metric}")
     if use_diffusion:
         print(f"Mean CRPS = {crps}")
-        print(f"Mean PITD = {PITD_metric}")
+        
 
 

@@ -32,7 +32,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Train the model and returns the average loss & the weights
 def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, learning_rate, asked_model, model_parameters, 
-          temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion, use_diffusion, patience_treshold,
+          temp_factor, spatial_factor, n_input, loss_function, treshold_constraint_deter, model_parameters_diffusion, use_diffusion, patience_threshold,
           testing = True, saving = False, save_dir = None, split = None, name_run = "run"):
 
 
@@ -71,10 +71,11 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     # Define the diffusion model, the encoding strategy & the noise scheduler
     in_channels = 2*(temp_factor) + 1       # To compute useful dimensions
 
-    nb_steps, beta, conservative_mass_diffusion = model_parameters_diffusion
+    nb_steps, beta, conservative_mass_diffusion, nb_heads, window_size, strat_attention_diffu = model_parameters_diffusion
 
     model_diffusion = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128, 
-                                       temp_factor = temp_factor, spatial_factor = spatial_factor).to(device)
+                                       temp_factor = temp_factor, spatial_factor = spatial_factor, window_size = window_size, 
+                                       nb_heads = nb_heads, strat_attention = strat_attention_diffu).to(device)
 
     temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_input).to(device).train()
     scheduler_diff = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1], type = beta[2])
@@ -233,7 +234,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 patience_counter += 1
 
             # Early stop if no significant improve for too many validating epochs
-            if patience_treshold != None and patience_counter >= patience_treshold:
+            if patience_threshold != None and patience_counter >= patience_threshold:
                 print(f"Early stopping at epoch {epoch}")
                 return best_weights_deter, best_weights_diffusion, best_loss
 

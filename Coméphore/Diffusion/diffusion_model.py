@@ -68,11 +68,18 @@ class TimeEmbedding(nn.Module):
 
         return emb  # (B, dim), dim is the final dimension of the temporal vector
 
-# Usual way to compute cross attention 
+    
+# Usual way to compute temporal cross attention with multi attention heads 
 # The feature map pays attention to the temporal embedding
 class CrossAttentionBlock(nn.Module):
-    def __init__(self, embed_dim, feature_dim):
+    def __init__(self, embed_dim, feature_dim, n_heads):
         super().__init__()
+        assert embed_dim % n_heads == 0, "embed_dim must be divisible by n_heads"
+        self.embed_dim = embed_dim
+        self.feature_dim = feature_dim
+        self.n_heads = n_heads
+        self.head_dim = embed_dim // n_heads
+
         self.query_proj = nn.Linear(feature_dim, embed_dim)
         self.key_proj = nn.Linear(embed_dim, embed_dim)
         self.value_proj = nn.Linear(embed_dim, embed_dim)
@@ -81,14 +88,108 @@ class CrossAttentionBlock(nn.Module):
     def forward(self, feature_map, temporal_embedding):  # (B, C, H, W), (B, T, D)
         B, C, H, W = feature_map.shape
         feat = feature_map.view(B, C, -1).permute(0, 2, 1)  # (B, H*W, C)
-        queries = self.query_proj(feat)  # (B, H*W, D)
-        keys = self.key_proj(temporal_embedding)  # (B, T, D)
-        values = self.value_proj(temporal_embedding)  # (B, T, D)
+        Q = self.query_proj(feat)  # (B, H*W, D)
+        K = self.key_proj(temporal_embedding)  # (B, T, D)
+        V = self.value_proj(temporal_embedding)  # (B, T, D)
 
-        attn = torch.softmax(queries @ keys.transpose(-2, -1) / (C ** 0.5), dim=-1)
-        attended = attn @ values  # (B, H*W, D)
-        out = self.out_proj(attended)  # (B, H*W, C)
-        return (feat + out).permute(0, 2, 1).view(B, C, H, W)  # Residual approach
+        # Reshape for multi-head attention
+        def reshape_for_heads(x):
+            B, N, D = x.shape
+            x = x.view(B, N, self.n_heads, self.head_dim)
+            return x.permute(0, 2, 1, 3)  # (B, n_heads, N, head_dim)
+
+        Q = reshape_for_heads(Q)
+        K = reshape_for_heads(K)
+        V = reshape_for_heads(V)
+
+        attn_scores = (Q @ K.transpose(-2, -1)) / (self.head_dim ** 0.5)  # (B, n_heads, H*W, T)
+        attn_weights = torch.softmax(attn_scores, dim=-1)
+        attn_output = attn_weights @ V  # (B, n_heads, H*W, head_dim)
+
+        # Concatenate heads
+        attn_output = attn_output.permute(0, 2, 1, 3).contiguous()  # (B, H*W, n_heads, head_dim)
+        attn_output = attn_output.view(B, -1, self.embed_dim)  # (B, H*W, D)
+
+        out = self.out_proj(attn_output)  # (B, H*W, C)
+        return (feat + out).permute(0, 2, 1).view(B, C, H, W)  # Residual connection
+
+
+
+# Takes (B, T, C) as input and returns same size by passing it to a self attention mecanism
+# B is the batch, T is the sequence of tokens, C are the token's channels.
+# Each element of B is of channel C and will pay attention to the sequence of length T (where each element is also of channel C because it is self attention)
+# This is the base architecture that will be used for spatial self attention below
+class SelfAttentionBlock(nn.Module):
+    def __init__(self, channels, num_heads, dropout=0.1, nb_features = 128):
+        super().__init__()
+
+        # Attention Matrix
+        self.Q = nn.Linear(channels, nb_features)
+        self.K = nn.Linear(channels, nb_features)
+        self.V = nn.Linear(channels, nb_features)
+
+        # Tensor X update
+        self.norm1 = nn.LayerNorm(channels)  # Normalize over last dim (channels)
+        self.attn = nn.MultiheadAttention(embed_dim=nb_features, num_heads=num_heads, batch_first=True)
+
+        self.dropout = nn.Dropout(dropout)
+        self.norm2 = nn.LayerNorm(channels)
+
+        self.ffn = nn.Sequential(
+            nn.Linear(nb_features, channels * 4),  # (B, T, nb_features) → (B, T, 4C)
+            nn.ReLU(),
+            nn.Linear(channels * 4, channels),  # (B, T, 4C) → (B, T, C)
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):        
+        # LayerNorm before attention
+        x_norm = self.norm1(x)  # (B, T, C)
+
+        # Compute (self) attention matrix
+        query = self.Q(x_norm)      # (B, T, n_features)
+        key = self.K(x_norm)        # (B, T, n_features)
+        value = self.V(x_norm)      # (B, T, C)
+
+        # Compute multi head attention output
+        attn_output, _ = self.attn(query = query, key = key, value = value)  # (B, T, nb_features)
+
+        attn_with_dropout = self.dropout(attn_output)
+
+        # Feedforward network with residual
+        ff_output = self.ffn(attn_with_dropout)  # (B, T, C)
+        x = x + ff_output  # (B, T, C)
+
+        return x  # Output shape: (batch_size, seq_len, channels)
+    
+
+# Takes (B, C, H, W) as input and returns same size by passing it to a spatial attention mecanism
+# Every pixel of each frame will be transformed according to its neighbor values (from the same frame)
+class LocalSpatialAttention(nn.Module):
+    def __init__(self, channels, num_heads, window_size):
+        super().__init__()
+
+        self.window_size = window_size
+        self.model = SelfAttentionBlock(channels = channels, num_heads = num_heads)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+
+        # Unfold to get local windows for each pixel
+        patches = F.unfold(x, kernel_size = self.window_size, padding = self.window_size // 2)  # shape: (B, C*n², H*W) where n is the window_size
+
+        patches = patches.transpose(1, 2).contiguous().view(B*H*W, self.window_size**2, C)  # (B*H*W, n², C)
+
+        attn_output = self.model(patches)       # (B*H*W, n², C)
+
+        # Take the center token (position in the patch)
+        center_index = self.window_size**2 // 2
+        output = attn_output[:, center_index, :].unsqueeze(1)  # (B*H*W, 1, C), we took the center of the window
+
+        # Restore image shape
+        output = output.transpose(1, 2).contiguous().view(B, C, H, W)    # (B, C, H, W)
+
+        return output
 
 
 # Weight standardized 2D convolution, prevents overfitting.
@@ -141,8 +242,13 @@ class ConvBlock(nn.Module):
 
 # Global diffusion UNet
 class UNetforDiffusion(nn.Module):
-    def __init__(self, in_channels, base_channels, embed_dim, time_emb_dim, temp_factor, spatial_factor):
+    def __init__(self, in_channels, base_channels, embed_dim, time_emb_dim, temp_factor, spatial_factor, window_size, nb_heads, strat_attention):
         super().__init__()
+        # Attention factor
+        self.strat_attention = strat_attention  # Attention strategy, wether to compute the temporal/spatial or not
+        self.window_size = window_size          # Base size of the attention window (that can decrease over the encoder layers)
+        self.nb_heads = nb_heads                # Number of heads for attention
+
         # SR factors
         self.temp_factor = temp_factor
         self.spatial_factor = spatial_factor
@@ -161,9 +267,23 @@ class UNetforDiffusion(nn.Module):
         # Pooling
         self.pool = nn.MaxPool2d(2)
 
-        # Temporal attention
-        self.attn_blocks = nn.ModuleList([CrossAttentionBlock(embed_dim, base_channels), CrossAttentionBlock(embed_dim, base_channels * 2),
-            CrossAttentionBlock(embed_dim, base_channels * 4), CrossAttentionBlock(embed_dim, base_channels * 8)])
+        # Temporal cross attention
+        self.temporal_attn_blocks = nn.ModuleList([CrossAttentionBlock(embed_dim, base_channels, n_heads=self.nb_heads), 
+                                          CrossAttentionBlock(embed_dim, base_channels * 2, n_heads=self.nb_heads),            
+                                          CrossAttentionBlock(embed_dim, base_channels * 4, n_heads=self.nb_heads), 
+                                          CrossAttentionBlock(embed_dim, base_channels * 8, n_heads=self.nb_heads)])
+        
+        # Convolution between time & space attention
+        self.conv_between_attention = nn.ModuleList([ConvBlock(base_channels, base_channels, time_emb_dim), 
+                                                     ConvBlock(base_channels*2, base_channels*2, time_emb_dim),
+                                                     ConvBlock(base_channels*4, base_channels*4, time_emb_dim),
+                                                     ConvBlock(base_channels*8, base_channels*8, time_emb_dim)])
+
+        # Spatial attention
+        self.spatial_attn_blocks = nn.ModuleList([LocalSpatialAttention(channels = base_channels, num_heads = self.nb_heads, window_size = self.window_size[0]), 
+                                                  LocalSpatialAttention(channels = base_channels*2, num_heads = self.nb_heads, window_size = self.window_size[1]),
+                                                  LocalSpatialAttention(channels = base_channels*4, num_heads = self.nb_heads, window_size = self.window_size[2]),
+                                                  LocalSpatialAttention(channels = base_channels*8, num_heads = self.nb_heads, window_size = self.window_size[3])])
 
         # Decoder. Each layer is the combination of a transposed convolution to upsample and a Convolutional block with FiLM
         self.upconv3 = nn.ConvTranspose2d(base_channels * 8, base_channels * 4, 2, stride=2)
@@ -204,8 +324,17 @@ class UNetforDiffusion(nn.Module):
         skips = []
         e = x
         for i in range(len(self.encoder)):
-            e, skip = self.encoder[i](e, t_emb)             # Remember the output for the skip connection
-            e = self.attn_blocks[i](e, temporal_embedding)  # Pay attention to the whole (embedded) sequence
+            e, skip = self.encoder[i](e, t_emb)                         # Remember the output for the skip connection
+
+            if "time" in self.strat_attention:
+                e = self.temporal_attn_blocks[i](e, temporal_embedding)     # Pay temporal cross attention to the whole (embedded) sequence
+
+                if "space" in self.strat_attention:
+                    e, _ = self.conv_between_attention[i](e, t_emb)                # Convolution 
+            
+            if "space" in self.strat_attention:
+                e = self.spatial_attn_blocks[i](e)                          # Pay spatial self attention to your neighbors
+
             if i < len(self.encoder) - 1:
                 skips.append(skip)
                 e = self.pool(e)

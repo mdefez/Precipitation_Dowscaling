@@ -115,8 +115,8 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
         return (term1 - 0.5 * term2).mean()         # mean over the batch
     
 
-    def PITD_loss(self, list_output, target):            # Compute the mean PITD over the batch (each PITD is computed for the aggregated distribution of the videos & timesteps)
-        return PITD().forward(list_output, target)
+    def PITD_loss(self, list_output, target, dict_pdf, time_step):            # Compute the mean PITD over the batch (each PITD is computed for the aggregated distribution of the videos & timesteps)
+        return PITD().forward(list_output, target, dict_pdf, time_step)
 
     
 
@@ -282,6 +282,7 @@ class SSIM(nn.Module):
 
 # Compute the rank histogram and the deviation between predictions / target (that should follow a uniform distribution over [0, 1])
 # We compute a rank histogram whose base is the data of all the samples (all the timesteps & all the generated videos). One can eventually plot it 
+# It returns the average value of the PITD and the pdf of F_X_Y for each quantiles 
 class PITD(nn.Module):
     def __init__(self):
         super().__init__()
@@ -301,13 +302,15 @@ class PITD(nn.Module):
         F_X_Y = np.searchsorted(pred_sorted, target_values, side='right') / len(pred_sorted)
         F_X_X = np.searchsorted(pred_sorted, pred_sorted, side='right') / len(pred_sorted)
 
-        # If the target frames are completely null, then the output is null as well and the predictions are perfect
-        if target_values.max() == 0:
-            return 0
-
         # Compute histogram. Get the pre-computed quantiles from the WHOLE training set
         df = pd.read_csv("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Data_analysis/8_quantiles.csv")
         quantiles = np.asarray(df["quantile"])                      # Quantiles of interest, computed from the training set
+
+        # If the target frames are completely null, then the output is null as well and the predictions are perfect
+        if target_values.max() == 0:
+            frequency = np.zeros(len(quantiles) - 1)
+            frequency[0] = 1 
+            return 0, frequency
 
         # Computes the normalized distribution for the specified quantiles (for the prediction and truth)
         counts, bin_edges = np.histogram(F_X_Y, quantiles)
@@ -346,7 +349,7 @@ class PITD(nn.Module):
         # Computes the deviation
         pitd = np.sqrt(np.sum(((frequency - frequency_pred) ** 2) * size_quantile))        # We multiple by size_quantile to take into account the fact the quantiles are not equally separated
 
-        return pitd
+        return pitd, frequency
     
     # Get the list of scenarios for only one sample out of the list of batch
     def get_sample_from_batch(self, list_output, sample):
@@ -360,20 +363,16 @@ class PITD(nn.Module):
         for b in range(min(15, B)):     # We don't plot more than 15 PIT
             local_output = self.get_sample_from_batch(list_output, b)
             local_target = target[b, :, :, :]
-            local_plot_path = plot_path + f"sample_{b}.png"
-            print(b)
-            self.compute_rank_histogram(list_output = local_output,
+            local_plot_path = plot_path + f"sample_{b+1}.png"
+            a, c = self.compute_rank_histogram(list_output = local_output,
                                                     target = local_target,
                                                     plot_histo = True,
                                                     plot_path=local_plot_path)
-            
-            plt.imshow(np.array(local_target[0, :, :]), cmap = "viridis", vmin = 0, vmax = 1)
-            plt.savefig(f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_10_temp_3/bicubic/bicubic_n_days_test_2/PITD/plot_{b}.png")
-
                                
                 
     # Compute the PITD for each sample then average it over the batch
-    def forward(self, list_output, target):    # list_output is a list of predictions (B, C, H, W). Target is (B, C, H, W)
+    # Fill the array in input with the values at the quantiles
+    def forward(self, list_output, target, dict_pdf, time_step):    # list_output is a list of predictions (B, C, H, W). Target is (B, C, H, W). time_step is the list of timesteps of length B
 
         B, C, H, W = target.shape
 
@@ -381,14 +380,19 @@ class PITD(nn.Module):
         for b in range(B):
             local_output = self.get_sample_from_batch(list_output, b)
             local_target = target[b, :, :, :]
-            mean_pitd += self.compute_rank_histogram(list_output = local_output,
+            pitd, frequencies = self.compute_rank_histogram(list_output = local_output,
                                                     target = local_target,
                                                     plot_histo = False)
+            
+            # Stores the quantiles' values
+            dict_pdf[time_step[0][b].item()] = frequencies
+
+            mean_pitd += pitd
         
                 
         mean_pitd = mean_pitd / B
 
-        return mean_pitd
+        return mean_pitd, dict_pdf
 
 
 

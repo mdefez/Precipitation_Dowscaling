@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 # Takes (B, T, C) as input and returns same size by passing it to an attention mecanism
 # B is the batch, T is the sequence of tokens, C are the token's channels
 class SelfAttentionBlock(nn.Module):
@@ -116,7 +117,7 @@ class UNet_with_attention(nn.Module):
         self.n_inputs = model_parameters[1]
         self.attention = model_parameters[2]                # Attention strategy
         self.nb_heads = model_parameters[3]                 # Number of heads for the MHA
-        self.window_size = model_parameters[4]              # window size for spatial attention
+        self.window_size = model_parameters[4]              # window size for spatial attention. Its a list where the i-th element is the size for the i-th layer
 
         self.base_channels = base_channels
 
@@ -136,11 +137,11 @@ class UNet_with_attention(nn.Module):
         self.conv_between_bottleneck = self.conv_block(base_channels * 16, base_channels * 16)
 
         # Spatial attention
-        self.spatial_attn1 = LocalSpatialAttention(channels = base_channels, num_heads = self.nb_heads, window_size = self.window_size)
-        self.spatial_attn2 = LocalSpatialAttention(channels = base_channels * 2, num_heads = self.nb_heads, window_size = self.window_size)
-        self.spatial_attn3 = LocalSpatialAttention(channels = base_channels * 4, num_heads = self.nb_heads, window_size = self.window_size)
-        self.spatial_attn4 = LocalSpatialAttention(channels = base_channels * 8, num_heads = self.nb_heads, window_size = self.window_size)
-        self.spatial_attn_bottleneck = LocalSpatialAttention(channels = base_channels * 16, num_heads = self.nb_heads, window_size = self.window_size)
+        self.spatial_attn1 = LocalSpatialAttention(channels = base_channels, num_heads = self.nb_heads, window_size = self.window_size[0])
+        self.spatial_attn2 = LocalSpatialAttention(channels = base_channels * 2, num_heads = self.nb_heads, window_size = self.window_size[1])
+        self.spatial_attn3 = LocalSpatialAttention(channels = base_channels * 4, num_heads = self.nb_heads, window_size = self.window_size[2])
+        self.spatial_attn4 = LocalSpatialAttention(channels = base_channels * 8, num_heads = self.nb_heads, window_size = self.window_size[3])
+        self.spatial_attn_bottleneck = LocalSpatialAttention(channels = base_channels * 16, num_heads = self.nb_heads, window_size = self.window_size[4])
 
 
         # Encoder
