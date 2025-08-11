@@ -24,6 +24,7 @@ from inference import sample_diffusion
 from tqdm import tqdm
 import pandas as pd
 import matplotlib.patches as patches
+import time
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -307,7 +308,7 @@ def load_model(model, filepath):
 
 # Main function to test the model
 def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios, use_diffusion,
-         criterion, batch_size, asked_model, model_parameters, delta, n_inputs, model_parameters_diffusion):
+         criterion, batch_size, asked_model, model_parameters, delta, n_inputs, model_parameters_diffusion, start_time):
     
     # Folder where one should save the plots
     output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
@@ -430,7 +431,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         pitd = np.sqrt(np.sum(((average_array - expected_frequency) ** 2) * size_quantile))
 
     plot_first_samples = True   # If one want to plot random samples
-    best_worst_to_plot = 10     # Number of best / worst samples to plot
+    best_worst_to_plot = 5      # Number of best / worst samples to plot
 
     with torch.no_grad():
 
@@ -439,6 +440,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         ploted_sample_pitd = False      # Keep track of the sample PITD plot, we plot them only for the first batch
         dict_pdf = {}                   # This dictionnary stores the values of the pdf (of each sample) that helps building each PIT plot. The goal is to compute an "average" PIT for the whole dataset and evaluate the model calibration
 
+        Time_limit = 2.8 * 24 * 60 * 60  # If the code runs for more than 2.7 days, break it and return the temporary results
         multiple_scenarios = True if n_scenarios >=2 else False
 
         # Loop over the testing set
@@ -493,7 +495,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
                             delta = delta, multiple_scenarios = multiple_scenarios, best_worst = False)
                 plot_first_samples = False
 
-            ### Keep track of the best/wors samples ###
+            ### Keep track of the best/worst samples ###
             # Fill the list with the first 5 values
             if len(worst_loss) < best_worst_to_plot:
                 # Worst loss
@@ -505,16 +507,11 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
                 min_loss_of_the_worst = worst_loss[0]
 
-
-            threshold_best = 0.001      # For best samples, we only look for samples with a little bit of rain, otherwise the best samples would be all zeroes as the model makes no mistakes for them
             if len(best_loss) < best_worst_to_plot:
                 # Best loss
-                idx = 0
-                while len(best_loss) < best_worst_to_plot:                          # Fill it until it reaches the right length
-                    if get_sample(list_low_res, idx)[-1].mean() > threshold_best:   # Fill it with valid (non null) candidates
-                        best_loss.append(loss_vector[idx].item())                   # add the marginal loss
-                        best_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[0][idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
-                    idx += 1
+                for idx in range(best_worst_to_plot - len(best_loss)):                          # Fill it until it reaches the right length
+                    best_loss.append(loss_vector[idx].item())                   # add the marginal loss
+                    best_sample.append([get_sample(list_low_res, idx), get_sample(time_idx, idx), B_pred[0][idx], output_deter[idx], channel[idx], target[idx]]) # add the corresponding sample
 
                 best_loss, best_sample = sort_l1_l2(best_loss, best_sample)         # Both list are sorted ascendingly 
 
@@ -535,16 +532,19 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
                         min_loss_of_the_worst = worst_loss[0]
 
-                    last_frame = get_sample(list_low_res, k)[-1]
-                    if last_frame.mean() > threshold_best: # We only select predictions with at least some precipitation
-                        # If the loss is lower than the max of the n lowest, we should replace the sample
-                        if marginal_loss < max_loss_of_the_best:
-                            best_loss[-1] = marginal_loss
-                            best_sample[-1] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[0][k], output_deter[k], channel[k], target[k]]
-                            # Sort both list again & compute the new min of the highest
-                            best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
+                    # If the loss is lower than the max of the n lowest, we should replace the sample
+                    if marginal_loss < max_loss_of_the_best:
+                        best_loss[-1] = marginal_loss
+                        best_sample[-1] = [get_sample(list_low_res, k), get_sample(time_idx, k), B_pred[0][k], output_deter[k], channel[k], target[k]]
+                        # Sort both list again & compute the new min of the highest
+                        best_loss, best_sample = sort_l1_l2(best_loss, best_sample) # Both list are sorted ascendingly 
 
-                            max_loss_of_the_best = best_loss[-1]
+                        max_loss_of_the_best = best_loss[-1]
+            
+            # Interrupt if running for too long
+            if time.time() - start_time > Time_limit:
+                print(f"Time limit of {Time_limit / (24*60*60)} days reached")
+                break
 
 
 

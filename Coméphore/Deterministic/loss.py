@@ -91,7 +91,7 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
 
 
     def forward_vecteur(self, outputs, targets): # Compute the loss as a vector (only for the main metric), useful for selecting the "best" and "worst" samples
-        loss = self.loss_vector(outputs, targets).mean(dim = (1, 2, 3)) 
+        loss = self.loss_vector(outputs, targets).mean(dim = (1, 2, 3))         # (B)
 
         return loss 
     

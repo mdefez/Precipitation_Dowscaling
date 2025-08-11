@@ -384,20 +384,20 @@ class UNet_with_attention(nn.Module):
         strategy, f = self.hard_constraint_mass
 
         f_output = f(prediction)  # shape: (B, C, H, W)
-
+        
         # Compute the mass reference
         P_LR = last_frame.squeeze(2).squeeze(1)   # (B, H', W')
         P_LR = P_LR.sum(dim = (1, 2))       # (B)
 
         # Compute the sum at the denominator for the current predictions
-        sum_f = f_output.sum(dim=(2, 3)) / (self.spatial_factor ** 2)  #  (B, C)
+        sum_f = f_output.sum(dim=(1, 2, 3))   #  (B)
 
         # Make everything homogenous
         P_LR = P_LR.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
-        sum_f = sum_f.unsqueeze(2).unsqueeze(3)        # (B, C, 1, 1)
+        sum_f = sum_f.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
 
         # Compute the final (constrained) predictions
-        output_final = f_output * (P_LR / sum_f)   # shape: (B, C, H, W)
+        output_final = f_output * (P_LR * self.temp_factor * (self.spatial_factor ** 2) / sum_f)   # shape: (B, C, H, W)
 
         return output_final
 

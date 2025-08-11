@@ -38,14 +38,14 @@ if torch.cuda.is_available():
 temp_factor = 3
 spatial_factor = 10
 
-patience_threshold = 7      # Early training, triggers if there is no improvement for patience_threshold validating epochs
+patience_threshold = 6      # Early training, triggers if there is no improvement for patience_threshold validating epochs
 n_inputs = 4                # Ordered frames to take into account as input, the last one is the image to downscale
 delta = False               # If we want to predict deltas instead of real frames (except for the first one)
 
-n_scenarios = 5     # Number of scenarios to compute
+n_scenarios = 3     # Number of scenarios to compute
 
 n_days_train = 28       # Only first n_days are used for each month. Set this to an integer between 2 and 28
-n_days_test = 28         # Same for n_test. 
+n_days_test = 14         # Same for n_test. 
 
 # Choose wether we want to train/test/both and normalize
 training = True 
@@ -55,7 +55,7 @@ testing = True
 cross_val = False           # If we want to perform cross validation or simple training/validating
 
 # Training features
-batch_size = 4
+batch_size = 8
 epochs = 120
 learning_rate = 1e-4
 
@@ -79,10 +79,9 @@ strat_attention_diffu = ["time", "space"]
 strat_attention_deter = ["time", "space"]
 
 nb_heads = 4                        # Number of attention heads used during the MHA (both for time & space)
-window_size = [3, 3, 3, 1, 1]       # window size for spatial attention. Every element should be odd
+window_size = [3, 3, 1, 1, 1]       # window size for spatial attention. Every element should be odd
 if "space" not in strat_attention_deter + strat_attention_diffu:
     window_size = [None] * 5
-
 
 
 ###### Mass conservation ###### Same for both models
@@ -91,7 +90,7 @@ available_strategy_mass = [None, ("a function type that operates on tensors", "i
 # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and it should not diverge when x is big
 # It is thus recommended to choose a polynomial with an epsilon for numerical stability
 def f_mass(x): 
-    return 1e-7 + x**3 
+    return 1e-7 + x**2 
 treshold_constraint_deter = 20 # Epoch where we should begin to apply conservative transformation for the deterministic model
 
 
@@ -112,13 +111,11 @@ dir_weights_deter = None
 model_deter = "UNet_with_attention" 
 model_deter_parameters = (("image-scale", f_mass), n_inputs, strat_attention_deter, nb_heads, window_size, mse_deter, dir_weights_deter)
 
-
-
 ##### Diffusion model #####
 use_diffusion = True        # If we want to use diffusion or only the deterministic approach
 
 nb_steps = 1000                         # Number of denoising steps
-beta = (1e-3, 0.2, "quadratic")       # beta_start, beta_end, linear/quadratic
+beta = (0, 0.15, "quadratic")       # beta_start, beta_end, linear/quadratic
 
 conservative_mass_diffusion = ("image-scale", f_mass)     # Scale (image or patch -scale) + Function for the multiplicative approach
 
@@ -156,7 +153,7 @@ strat_precip = "min_max"
 strat_dem = "min_max"
 
 # Design the name of the run
-name_of_the_run = f"diffusion_{use_diffusion}_input_{n_inputs}_n_days_{n_days_train}_attention_{strat_attention_deter+strat_attention_diffu}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint_deter}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
+name_of_the_run = f"diffusion_{use_diffusion}_input_{n_inputs}_n_days_{n_days_train}_{n_days_test}_attention_{strat_attention_deter+strat_attention_diffu}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint_deter}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
 
 if model_deter in ["bicubic", "nearest_neighbor"]: # If we use a shallow model
     if use_diffusion == False: # If we only use the shallow model
@@ -183,6 +180,7 @@ assert not (training == True and (model_deter in ["nearest_neighbor", "bicubic"]
 assert (n_inputs != 1 and "time" in strat_attention_deter+strat_attention_diffu) or n_inputs == 1, "You should not set n_inputs to more than 1 if you don't compute temporal attention"
 assert strat_dem in dict_strategies and strat_precip in dict_strategies, "You chose an unavailable scaling strategies"
 assert n_scenarios == 1 or use_diffusion == True, "You can't generate multiple scenarios if the model is deterministic"
+assert batch_size >= 6 or testing == False, "batch_size can not be lower than 5 during testing (needed to compute best/worst samples)"
 
 print(f"SR factor ({spatial_factor}, {temp_factor})")
 print(f"RUN : {name_of_the_run}")
@@ -253,7 +251,7 @@ if testing:
 
     test(test_dataset=normalized_test_dataset, spatial_factor=spatial_factor, temp_factor=temp_factor, name_of_the_run=name_of_the_run,
          criterion=metric, batch_size=batch_size, asked_model=model_deter, model_parameters=model_deter_parameters, delta = delta, n_inputs = n_inputs,
-         model_parameters_diffusion = model_parameters_diffusion, n_scenarios=n_scenarios, use_diffusion = use_diffusion)
+         model_parameters_diffusion = model_parameters_diffusion, n_scenarios=n_scenarios, use_diffusion = use_diffusion, start_time = start_time)
 
 
 end_time_testing = time.time()
