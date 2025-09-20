@@ -1,4 +1,4 @@
-# This scripts aims to define a custom loss function implementing some options
+# This scripts aims to define custom loss function that are used to evaluate models
 
 import torch 
 import torch.nn as nn
@@ -16,63 +16,9 @@ warnings.filterwarnings(
     message="Importing `spectral_angle_mapper` from `torchmetrics.functional` was deprecated"
 )
 
-class CustomLossTrain(nn.Module):
-    def __init__(self, base_loss, conservative = False, lambda_conservative = 0.1, lambda_covariance = 0.1, covariance = False):
-        super().__init__()
-
-        self.loss_mean = copy.deepcopy(base_loss)
-        self.loss_none = copy.deepcopy(base_loss)
-
-        # On force les modes de réduction
-        self.loss_mean.reduction = 'mean'
-        self.loss_none.reduction = 'none'
-
-        self.lambda_conservative = lambda_conservative
-        self.lambda_covariance = lambda_covariance
-        self.conservative = conservative
-        self.covariance = covariance
-
-
-    # Returns the temporal autocorrelation of the 6 channels
-    # Output is (B, H, W, 6, 6) because there is a 6*6 matrix for each pixel (storing the autocorrelation factors for every lags)
-    def compute_autocorr_matrix(self, x):
-
-        x = x.permute(0, 2, 3, 1)  # [B, H, W, T]
-        x = x.unsqueeze(-1)        # [B, H, W, T, 1]
-        x_T = x.transpose(-2, -1)  # [B, H, W, 1, T]
-
-        # Outer product: [B, H, W, T, T]
-        autocorr = x @ x_T
-
-        return autocorr  # [B, H, W, 6, 6]
-
-    def forward(self, outputs, targets):
-        loss = self.loss_mean(outputs, targets) 
-
-        if self.conservative == True:
-            # Conservative term
-            sum_outputs = outputs.sum(dim=(1, 2, 3))  # Sum over the channels + whole frames
-            sum_targets = targets.sum(dim=(1, 2, 3))  # Same for target
-
-            conservative_term = torch.abs(sum_outputs - sum_targets).mean()  # Compute the difference and average over the whole batch
-
-            loss += self.lambda_conservative * conservative_term
-
-        if self.covariance == True:
-            # Autocorrelative term
-            ac_out = self.compute_autocorr_matrix(outputs)  # [B, H, W, 6, 6]
-            ac_tar = self.compute_autocorr_matrix(targets)  # [B, H, W, 6, 6]
-
-            # Frobenius norm of difference
-            frob_diff = torch.norm(ac_out - ac_tar, dim=(-2, -1))  # [B, H, W]
-            frob_loss = frob_diff.mean()  # Mean over the batch & pixels
-
-            loss += self.lambda_covariance * frob_loss
-
-        return loss 
     
-
-class LossTest(nn.Module):          # We us this loss function as a metric on the training set. It allows to compute averaged and marginal loss over the batch
+# We use this loss function as a metric on the training set. It allows to compute averaged or marginal loss over the batch
+class LossTest(nn.Module):          
     def __init__(self, df_metric):
         super().__init__()
         self.name_metric = list(df_metric["Name"])
@@ -95,27 +41,29 @@ class LossTest(nn.Module):          # We us this loss function as a metric on th
 
         return loss 
     
-    def crps(self, list_outputs, target, v_func = lambda x: x**2):      # Compute the CRPS over a list of outputs (list of length the number of scenarios, each item is a batch)
+    # Compute the CRPS over a list of outputs (list of length the number of scenarios, each item is a batch)
+    def crps(self, list_outputs, target, v_func = lambda x: x**2):      
 
         # Transform the list of outputs as a tensor [M, B]
         ensemble_tensor = torch.stack(list_outputs)  # [M, B]
         M = ensemble_tensor.size(0)
 
-        # Apply the function v
+        # Apply the function v (that is usually set to identity)
         v_ensemble = v_func(ensemble_tensor)     # [M, B]
         v_y = v_func(target).unsqueeze(0)             # [1, B] 
 
-        # First quantity : Bias
+        # Compute the bias
         term1 = torch.mean(torch.abs(v_ensemble - v_y), dim=0)  # [B]
 
-        # Second quantity : Spread between scenarios
+        # Compute the spread over scenarios
         diff = v_ensemble.unsqueeze(1) - v_ensemble.unsqueeze(0)  # [M, M, B]
         term2 = torch.mean(torch.abs(diff), dim=(0,1))  # [B]
 
         return (term1 - 0.5 * term2).mean()         # mean over the batch
     
 
-    def PITD_loss(self, list_output, target, dict_pdf, time_step):            # Compute the mean PITD over the batch (each PITD is computed for the aggregated distribution of the videos & timesteps)
+    # Compute the mean PITD over the batch (each PITD is computed for the aggregated distribution of the videos & timesteps)
+    def PITD_loss(self, list_output, target, dict_pdf, time_step):            
         return PITD().forward(list_output, target, dict_pdf, time_step)
 
     
@@ -250,9 +198,9 @@ class EarthMovingDistance(nn.Module):
 
 
 
-# Compute SSIM (to evaluate the "realism" of the image) depending on the structure
-# This metric should be computed for each frame (H, W) so we iterate over the batch and the channels then average over it   
-# Between 0 and 1 (theoritically it could go to -1 for anticorrelation). 1 is the best 
+
+# Here we conmpute the SSIM, this metric should be computed for each frame (H, W) so we iterate over the batch and the channels then average over it   
+# The metric is between 0 and 1 (theoritically it could go to -1 for anticorrelation). The higher the better
 class SSIM(nn.Module):
     def __init__(self):
         super().__init__()
@@ -302,11 +250,11 @@ class PITD(nn.Module):
         F_X_Y = np.searchsorted(pred_sorted, target_values, side='right') / len(pred_sorted)
         F_X_X = np.searchsorted(pred_sorted, pred_sorted, side='right') / len(pred_sorted)
 
-        # Compute histogram. Get the pre-computed quantiles from the WHOLE training set
+        # Compute histogram. Get the pre-computed quantiles from the WHOLE training set (See Coméphore/STVD/explore_dataset.py)
         df = pd.read_csv("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Data_analysis/8_quantiles.csv")
         quantiles = np.asarray(df["quantile"])                      # Quantiles of interest, computed from the training set
 
-        # If the target frames are completely null, then the output is null as well and the predictions are perfect
+        # If the target frames are all zeros, then the output is null as well and the predictions are perfect
         if target_values.max() == 0:
             frequency = np.zeros(len(quantiles) - 1)
             frequency[0] = 1 
@@ -315,12 +263,13 @@ class PITD(nn.Module):
         # Computes the normalized distribution for the specified quantiles (for the prediction and truth)
         counts, bin_edges = np.histogram(F_X_Y, quantiles)
         size_quantile = [(quantiles[k+1] - quantiles[k]) for k in range(len(counts))]
-        counts = counts / size_quantile    # takes into account the fact quantiles are not equally separated
+        counts = counts / size_quantile                # Takes into account the fact quantiles are not equally separated
         frequency = counts / counts.sum()              # Make it a distribution as it sums up to 1
 
+        # We compute it for X as well to plot it, it should follow a uniform distribution
         counts_pred, bin_edges = np.histogram(F_X_X, quantiles)
-        counts_pred = counts_pred / size_quantile                       # takes into account the fact quantiles are not equally separated
-        frequency_pred = counts_pred / counts_pred.sum()                # Make it a distribution as it sums up to 1
+        counts_pred = counts_pred / size_quantile                   
+        frequency_pred = counts_pred / counts_pred.sum()                
 
         expected_frequency = 1 / len(counts)
         # Plot histogram

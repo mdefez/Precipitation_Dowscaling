@@ -3,7 +3,6 @@
 import torch
 import torch.nn.functional as F
 
-
 def setup_input(device, scheduler, A_seq, C, B, temporal_encoder): # Set up input/output for the diffusion model.
     A_seq = A_seq.to(device)            # (B, T, C_A, H, W) where C_A = 1. Output of the bicubic interpolation
     C = C.to(device)                    # (B, C_C, H, W) where C_C = temp_factor. Prediction of the deterministic model
@@ -126,19 +125,23 @@ def apply_conservative_regridding_final_output(B_pred, LR_input, spatial_factor,
 
         f_output = f(prediction)  # shape: (B, C, H, W)
 
+        # If we only have low precip (below the specified treshold), we set f to identity
+        if f_output.max() == 0:
+            f_output = prediction
+
         # Compute the mass reference
         P_LR = last_frame   # (B, H', W')
         P_LR = P_LR.sum(dim = (1, 2))       # (B)
 
         # Compute the sum at the denominator for the current predictions
-        sum_f = f_output.sum(dim=(2, 3)) / (spatial_factor ** 2)  #  (B, C)
+        sum_f = f_output.sum(dim=(1, 2, 3))   #  (B)
 
         # Make everything homogenous
         P_LR = P_LR.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
-        sum_f = sum_f.unsqueeze(2).unsqueeze(3)        # (B, C, 1, 1)
+        sum_f = sum_f.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
 
         # Compute the final (constrained) predictions
-        output_final = f_output * (P_LR / sum_f)   # shape: (B, C, H, W)
+        output_final = f_output * (P_LR * temp_factor * (spatial_factor ** 2) / sum_f)   # shape: (B, C, H, W)
 
         return output_final
     

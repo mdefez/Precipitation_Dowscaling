@@ -1,8 +1,8 @@
-# The goal of this file is to design a train function
-# It takes as input a training/validating dataset and it trains/tests the model on it 
-# It returns the weights and the loss
-# It returns the weights corresponding to the best model (on the validating set)
+# The goal of this file is to design a training function
+# It takes as input a training/validating dataset and it trains/validates the model on it 
+# It returns the weights and the loss corresponding to the best model (on the validating set)
 
+# Import useful librairies
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -24,6 +24,7 @@ sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Do
 from diffusion_model import UNetforDiffusion, TemporalEncoder, DiffusionScheduler
 from tools_diffu import setup_input, bicubic_A_seq
 
+# To monitor the training
 import wandb
 
 
@@ -50,9 +51,9 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     except:
         test_loader = None
 
-    # Load the deterministic model
+    # Load the deterministic model and its features
     if asked_model == "UNet_with_attention":
-        lambda_mse_deter, epoch_mse_deter = model_parameters[5]     # Strategy for adding (or not) the MSE deterministic into the global loss function
+        lambda_mse_deter, epoch_mse_deter = model_parameters[5]     # Strategy for adding (or not) the MSE deterministic into the global loss function for the first epochs
         dir_weights_deter = model_parameters[6]                     # Get the directory of the deterministic's weights if filled
         model_deter = UNet_with_attention(temp_factor=temp_factor, 
                                     spatial_factor=spatial_factor, 
@@ -71,12 +72,14 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
     # Define the diffusion model, the encoding strategy & the noise scheduler
     in_channels = 2*(temp_factor) + 1       # To compute useful dimensions
 
-    nb_steps, beta, conservative_mass_diffusion, nb_heads, window_size, strat_attention_diffu = model_parameters_diffusion
+    nb_steps, beta, conservative_mass_diffusion, nb_heads, window_size, strat_attention_diffu = model_parameters_diffusion  # Import diffusion features
 
+    # Load the diffusion model
     model_diffusion = UNetforDiffusion(in_channels=in_channels, base_channels=64, embed_dim=256, time_emb_dim = 128, 
                                        temp_factor = temp_factor, spatial_factor = spatial_factor, window_size = window_size, 
                                        nb_heads = nb_heads, strat_attention = strat_attention_diffu).to(device)
 
+    # Load the temporal encoder & the scheduler
     temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_input).to(device).train()
     scheduler_diff = DiffusionScheduler(timesteps=nb_steps, beta_start=beta[0], beta_end=beta[1], type = beta[2])
 
@@ -110,17 +113,13 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
         # Loop over the batches        
         for list_low_res, channel, target, time_idx in tqdm(train_loader, desc="Training", leave=False):
-
-            channel, target = channel.to(device), target.to(device)
-            for k in range(len(list_low_res)):
-                list_low_res[k] = list_low_res[k].to(device)
             
             if treshold_constraint_deter >= epoch: # After some epochs, we apply conservative transformation to fine tune the model
                 apply_constraint_deter = True
 
 
             # Compute the output of the deterministic model
-            output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint_deter)     # Compute the output of the deterministic model
+            output_deter = model_deter(list_low_res, channel, apply_constraint = apply_constraint_deter)    
 
             if use_diffusion:
                 # Compute the output of the diffusion model
@@ -134,9 +133,10 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                                             B = target, 
                                             temporal_encoder = temporal_encoder)
 
+                # Predict the velocity
                 pred_velo = model_diffusion(model_input, temporal_embed, t)
 
-                loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the velocity)
+                loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the true / predicted velocity)
 
                 try:
                     if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt (if asked) the loss function to force the deterministic UNet to be decent
@@ -154,11 +154,11 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             total_loss += loss.item()
 
             if epoch_batch == "batch":
-                scheduler.step() # Tune the learning rate value
+                scheduler.step() # Update the learning rate value
 
 
         if epoch_batch == "epoch":
-            scheduler.step() # Tune the learning rate value
+            scheduler.step() # Update the learning rate value
 
         avg_loss = total_loss / len(train_loader) # Compute the average loss over the epoch
 
@@ -167,8 +167,8 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
 
 
         # Validate the model on the validating dataset if asked
-        # We validate every n epochs
-        if testing == True and epoch % 3 == 0:
+        
+        if testing == True and epoch % 3 == 0:              # We validate every n epochs
             # Evaluate the model on the validating dataset
             print("Validating")
             model_deter.eval()
@@ -179,10 +179,6 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
             # To compute progress over testing
             with torch.no_grad():
                 for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
-
-                    channel, target = channel.to(device), target.to(device)
-                    for k in range(len(list_low_res)):
-                        list_low_res[k] = list_low_res[k].to(device)
 
                     # Compute the output of the deterministic model
                     output_deter = model_deter(list_low_res, channel, apply_constraint = True)    
@@ -198,6 +194,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                                                     B = target, 
                                                     temporal_encoder = temporal_encoder)
 
+                        # Compute the predicted velocity
                         pred_velo = model_diffusion(model_input, temporal_embed, t)
 
                         test_loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the noise)

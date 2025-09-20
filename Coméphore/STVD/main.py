@@ -35,17 +35,17 @@ if torch.cuda.is_available():
 
 
 # Super resolution factors
-temp_factor = 3
-spatial_factor = 10
+temp_factor = 6
+spatial_factor = 25
 
-patience_threshold = 6      # Early training, triggers if there is no improvement for patience_threshold validating epochs
-n_inputs = 4                # Ordered frames to take into account as input, the last one is the image to downscale
-delta = False               # If we want to predict deltas instead of real frames (except for the first one)
+patience_threshold = 7      # Stop training if there is no improvement for patience_threshold validating epochs
+n_inputs = 2                # Ordered frames to take into account as input, the last one is the image to downscale
+delta = None                # If we want to compute deltas or the true target
 
-n_scenarios = 3     # Number of scenarios to compute
+n_scenarios = 3     # Number of scenarios to generate
 
-n_days_train = 28       # Only first n_days are used for each month. Set this to an integer between 2 and 28
-n_days_test = 14         # Same for n_test. 
+n_days_train = 28           # Only first n_days are used for each month. Set this to an integer between 2 and 28
+n_days_test = 28            # Same for n_test. 
 
 # Choose wether we want to train/test/both and normalize
 training = True 
@@ -55,14 +55,14 @@ testing = True
 cross_val = False           # If we want to perform cross validation or simple training/validating
 
 # Training features
-batch_size = 8
+batch_size = 12
 epochs = 120
 learning_rate = 1e-4
 
 # Data directories
-input_dir = f'/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/spatial_{spatial_factor}_temp_{temp_factor}'          # Low res frames
-output_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data'        # High res targets
-channel_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/DEM'    # DEM
+input_dir = f'/work/FAC/FGSE/IDYST/tbeucler/downscaling/Comephore/RNB/input_data/spatial_{spatial_factor}_temp_{temp_factor}'          # Low res frames
+output_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/Comephore/RNB/target_data'        # High res targets
+channel_dir = '/work/FAC/FGSE/IDYST/tbeucler/downscaling/Comephore/RNB/input_data/DEM'    # DEM
 
 # Available models. One should choose a model and fill the corresponding parameters
 available_model_deter = ["UNet_with_attention", "nearest_neighbor", "bicubic"]
@@ -75,97 +75,113 @@ required_model_parameters = {"UNet_with_attention" : ("hard_constraint_mass", "n
 ##### Attention parameters ##### Shared for both models (except the strategy)
 
 list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
+
 strat_attention_diffu = ["time", "space"]
 strat_attention_deter = ["time", "space"]
 
-nb_heads = 4                        # Number of attention heads used during the MHA (both for time & space)
-window_size = [3, 3, 1, 1, 1]       # window size for spatial attention. Every element should be odd
+nb_heads = 4                        # Number of attention heads used during the Multi Head Attention (both for time & space)
+window_size = [3, 3, 1, 1, 1]       # window size for spatial attention. EVERY ELEMENT SHOULD BE ODD
 if "space" not in strat_attention_deter + strat_attention_diffu:
     window_size = [None] * 5
 
 
-###### Mass conservation ###### Same for both models
+###### Mass conservation strategy ###### 
 
 available_strategy_mass = [None, ("a function type that operates on tensors", "image or patch scale")] # The function should apply element wise for tensors
+
 # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and it should not diverge when x is big
-# It is thus recommended to choose a polynomial with an epsilon for numerical stability
-def f_mass(x): 
-    return 1e-7 + x**2 
+
+threshold_function = 0.025    # Threshold for the ReLU
+
+# Function for the deterministic model
+def f_mass_deter(x): 
+    y = x - threshold_function
+    return ((abs(y) + y) / 2)**0.5  # Square root of the ReLu
 treshold_constraint_deter = 20 # Epoch where we should begin to apply conservative transformation for the deterministic model
+
+# Function for the diffusion model
+def f_mass_diffu(x): 
+    y = x - threshold_function
+    return ((abs(y) + y) / 2)**0.5  # Square root of the ReLu
 
 
 
 ##### Deterministic model #####
 
-# For the first n epochs, we add the MSE of the deterministic model (output VS target) in the loss function to force the deter to be decent
+# For the first n epochs, we add the MSE of the deterministic model (output VS target) in the loss function to coerce the deter to provide decent predictions
 lambda_mse = 1
-epoch_stop_mse_deter = -1 # Epoch where we should stop adding the MSE to the global loss function. Set to -1 if one doesn't want to use it
+epoch_stop_mse_deter = 25 # Epoch where we should stop adding the MSE to the global loss function. Set to -1 if one doesn't want to use it
 mse_deter = (lambda_mse, epoch_stop_mse_deter)
 
 # Load pre train deterministic model
 # Fill with the path of the deterministic pre trained UNet one want to use, otherwise None
-dir_weights_deter = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/weights/spatial_1_temp_3/deter_alone_l2_input_4_n_days_30_attention_['time', 'space']_heads_4_delay_constraint_5_lr_0.0001_epochs_5_cross_val_False.pth" 
 dir_weights_deter = None
 
-# Choice of the model and parameters
+# Choice of the model and parameters. One must be sure the model is feed with the right parameters
 model_deter = "UNet_with_attention" 
-model_deter_parameters = (("image-scale", f_mass), n_inputs, strat_attention_deter, nb_heads, window_size, mse_deter, dir_weights_deter)
+model_deter_parameters = (("image-scale", f_mass_deter), n_inputs, strat_attention_deter, nb_heads, window_size, mse_deter, dir_weights_deter)
 
 ##### Diffusion model #####
-use_diffusion = True        # If we want to use diffusion or only the deterministic approach
+use_diffusion = True        # If we want to use diffusion 
 
 nb_steps = 1000                         # Number of denoising steps
-beta = (0, 0.15, "quadratic")       # beta_start, beta_end, linear/quadratic
+beta = (1e-4, 0.2, "quadratic")         # beta_start, beta_end, way to go from beta_min to beta_max
 
-conservative_mass_diffusion = ("image-scale", f_mass)     # Scale (image or patch -scale) + Function for the multiplicative approach
+conservative_mass_diffusion = ("image-scale", f_mass_diffu)     # Scale to apply conservation (Image scale is HIGLY reccomended) + Function for the multiplicative approach
 
-model_parameters_diffusion = (nb_steps, beta, conservative_mass_diffusion, nb_heads, window_size, strat_attention_diffu)
+model_parameters_diffusion = (nb_steps, beta, conservative_mass_diffusion, nb_heads, window_size, strat_attention_diffu)    # Don't change
 
 
 # Loss function (used for training)
-base_loss = nn.MSELoss       # Loss function computed over velocity or noise. It is highly recommended to use MSE.
+base_loss = nn.MSELoss       # Loss function computed over velocity
 
 # To define specific names for the metrics. All those custom losses are written in Deterministic/loss.py
 name_loss = {nn.MSELoss : "l2", nn.L1Loss : "l1", PercentileDifferenceLoss : "99th PE",
              Log_spectral_distance : "Log-spectral distance", EarthMovingDistance : "Earth-Moving Distance",
              SSIM : "SSIM"}
 
-# Metric (used for testing)
+# Metrics used during testing
 metric_test = [base_loss, nn.L1Loss, PercentileDifferenceLoss, Log_spectral_distance, EarthMovingDistance, SSIM]       # Fill by the metric to test the model on. The first one will be the main metric (used to compute the best/worst examples)
 name_metric = [name_loss[metric] for metric in metric_test]     # Name of the metrics
-df_metric = pd.DataFrame({"Name" : name_metric, "Metric" : metric_test})
 
+# Setting the metrics up in the right format
+df_metric = pd.DataFrame({"Name" : name_metric, "Metric" : metric_test})
 metric = LossTest(df_metric=df_metric)
 
 # Scheduler strategies
 # Number of steps := number of batch that will be passed into the nn. 
 total_steps = epochs * (16 * len(RainSuperResDataset(input_dir, output_dir, channel_dir, 0, 0, train=True, n_days=n_days_train, n_inputs=n_inputs, temp_factor=temp_factor, spatial_factor=spatial_factor, delta=delta))) / batch_size   
+# Available scheduler
 dict_scheduler = {"Step decay" : ("Step decay", "epoch", partial(StepLR, step_size= 10, gamma=0.2)), # Every step_size epoch, multiply the learning rate by gamma
                   "Cyclical" : ("Cyclical", "batch", partial(CyclicLR, base_lr=learning_rate, max_lr=learning_rate * 10, step_size_up=100, mode='triangular2')), # The lr goes from min to max in a step_size period. After each cycle, the max value is divided by 2
-                    "cosinus decrease" : ("cosinus decrease", "batch", partial(CosineAnnealingLR, T_max=total_steps))} # Cosinus that decreases to 0 in T_max steps 
+                    "cosinus decrease" : ("cosinus decrease", "batch", partial(CosineAnnealingLR, T_max=total_steps))} # Cosine annealing
+
 scheduler = dict_scheduler["cosinus decrease"] # Choose the strategy here
 
 
 # Normalization strategies
 dict_strategies = ["Standard", "min_max", "Robust"]
-
+# Choose the normalization strategy here. min_max is reccomended for precipitation
 strat_precip = "min_max"
 strat_dem = "min_max"
 
-# Design the name of the run
+# Create the name of the run, which contains main features
 name_of_the_run = f"diffusion_{use_diffusion}_input_{n_inputs}_n_days_{n_days_train}_{n_days_test}_attention_{strat_attention_deter+strat_attention_diffu}_window_{window_size}_heads_{nb_heads}_delay_constraint_{treshold_constraint_deter}_beta_{beta[0]}_{beta[1]}_lr_{learning_rate}_epochs_{epochs}_cross_val_{cross_val}"
 
 if model_deter in ["bicubic", "nearest_neighbor"]: # If we use a shallow model
     if use_diffusion == False: # If we only use the shallow model
         name_of_the_run = f"{model_deter}_n_days_test_{n_days_test}"
 
-    else:       # If we use diffusion, we want to keep tracks of all features and specify the sallow model we use
+    else:       # If we use diffusion, we want to keep tracks of all features and specify the shallow model we use
         name_of_the_run = f"{model_deter}_" + name_of_the_run
 
 
 ####################################################################################################################################################################################
 ####################################################################################################################################################################################
 ####################################################################################################################################################################################
+
+# This part of the file is for training / testing
+# One doesn't need to change features here
 
 # Check for valid settings
 assert not ("time" in strat_attention_deter+strat_attention_diffu and n_inputs == 1), "You want to compute temporal attention with a 1-input sequence"

@@ -3,13 +3,15 @@
 # The class should have a __getitem__ method that return an input & target to the model : 
 #   - a list of n following low res frames on the same tile, where n can be chosen
 #   - the tile's DEM 
-#   - the temp_factor targets corresponding to the last low res frame
+#   - the  targets corresponding to the last low res frame
 #   - the list of time indexes with usual format YYYYMMDDHH24
 
 import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class RainSuperResDataset(Dataset):
     def __init__(self, input_root, output_root, channel_root, hor, vert, temp_factor, spatial_factor, train=True, n_days = 5, n_inputs = 1, delta = False): # Channel refers to the DEM
@@ -130,5 +132,10 @@ class RainSuperResDataset(Dataset):
             
         targets = torch.stack(targets) 
         targets = targets.squeeze(1) # (temp_factor, H, W)
+
+        # Store the data in the device
+        channel, targets = channel.to(device), targets.to(device)
+        for k in range(len(low_res_tensors)):
+                low_res_tensors[k] = low_res_tensors[k].to(device)
 
         return low_res_tensors, channel, targets, low_res_idx # (List of inputs, dem, Tensor of targets, List of timesteps corresponding to targets)

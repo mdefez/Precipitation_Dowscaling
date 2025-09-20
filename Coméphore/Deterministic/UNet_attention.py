@@ -1,4 +1,4 @@
-# The goal of this script is to implement a UNet class with temporal attention
+# The goal of this script is to implement a UNet class with temporal/spatial attention
 
 from functools import partial
 import torch
@@ -6,11 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# Self attention : (B, T, C, H, W) to (B, T, C, H, W)
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
+# General block to compute self-attention
 # Takes (B, T, C) as input and returns same size by passing it to an attention mecanism
 # B is the batch, T is the sequence of tokens, C are the token's channels
 class SelfAttentionBlock(nn.Module):
@@ -108,7 +104,7 @@ class LocalSpatialAttention(nn.Module):
         return x  # (B, T, C, H, W)
 
 
-# This object allows to build a Positional Encoding Matrix to preserve the order within the tuple of tokens
+# This object allows to build a Positional Encoding Matrix to preserve the order of the sequence within the tuple of tokens
 # We must specify max_len, the max number of tokens. We can set it to 15 given that it's the number of previous frames, usually set around 5.
 class PositionalEncoding(nn.Module):  
     def __init__(self, num_hiddens, dropout=.1, max_len=15):      # num_hiddens is the dimension of the token's representation, in our case the number of channels
@@ -129,6 +125,7 @@ class PositionalEncoding(nn.Module):
         return self.dropout(X)
 
 
+# Deterministic UNet with temporal & spatial attention
 class UNet_with_attention(nn.Module):
     def __init__(self, temp_factor, spatial_factor, model_parameters, input_channels=2, base_channels=16):
         super().__init__()
@@ -138,7 +135,7 @@ class UNet_with_attention(nn.Module):
         self.hard_constraint_mass = model_parameters[0]
         self.n_inputs = model_parameters[1]
         self.attention = model_parameters[2]                # Attention strategy
-        self.nb_heads = model_parameters[3]                 # Number of heads for the MHA
+        self.nb_heads = model_parameters[3]                 # Number of heads for the Multi head attention
         self.window_size = model_parameters[4]              # window size for spatial attention. Its a list where the i-th element is the size for the i-th layer
 
         self.base_channels = base_channels
@@ -151,7 +148,7 @@ class UNet_with_attention(nn.Module):
         self.temp_attn4 = TemporalAttention(channels = base_channels * 8, num_heads = self.nb_heads)
         self.temp_attn_bottleneck = TemporalAttention(channels = base_channels * 16, num_heads = self.nb_heads)
 
-        # Convolution between temporal & spatial transformers
+        # Convolution between temporal & spatial attention mecanism
         self.conv_between1 = self.conv_block(base_channels, base_channels)
         self.conv_between2 = self.conv_block(base_channels * 2, base_channels * 2)
         self.conv_between3 = self.conv_block(base_channels * 4, base_channels * 4)
@@ -203,7 +200,6 @@ class UNet_with_attention(nn.Module):
         self.decoder1 = self.conv_block(base_channels * 2, base_channels)
 
 
-
         # Store the layers to make the forward more readable (and iterate over it)
         self.encoders = nn.ModuleList([self.encoder1, self.encoder2, self.encoder3, self.encoder4])
         self.temp_attention_blocks = nn.ModuleList([self.temp_attn1, self.temp_attn2, self.temp_attn3, self.temp_attn4])
@@ -219,7 +215,7 @@ class UNet_with_attention(nn.Module):
         self.final_layer =  nn.Sequential(nn.Conv2d(self.base_channels, out_channels=self.temp_factor, kernel_size=1),
                                           nn.ReLU())
 
-    # To match x's size to target before concatenating
+    # To match x's size to target before skip-connections
     def pad_to_match(self, x, target):
         diff_y = target.size(2) - x.size(2)
         diff_x = target.size(3) - x.size(3)
@@ -276,7 +272,7 @@ class UNet_with_attention(nn.Module):
 
         return x
     
-    # Eventually apply 0/1/2 attention architectures depending on the attention strategy
+    # Eventually apply 0/1/2 attention mecanism depending on the strategy
     def apply_attention(self, x_out, temp_bloc, conv, spatial_block):
         if "time" in self.attention:                     # Compute temporal attention 
             x_out = temp_bloc(x_out)        
@@ -291,17 +287,17 @@ class UNet_with_attention(nn.Module):
 
 
  
-    def unet_forward(self, x): # Be careful, this is only the UNet block, the "real" forward is below
+    def unet_forward(self, x): # Be careful, this is only the UNet block, the "real" forward is below (especially, this unet_forward does not compute mass conservation)
         # x: (B, T, C=2, H, W), we have two channels, the low res precip and the dem. T is the number of inputs
 
-        # ===== Encoder =====
+        # Encoder
         encoder_outputs = []
         x_in = x
         for k in range(len(self.encoders)):
             x_out = self.apply_conv_per_t(x_in, self.encoders[k])
             encoder_outputs.append(x_out) # Save the convolution output to perform the future skip connection
 
-            x_out = self.apply_attention(x_out, self.temp_attention_blocks[k], self.conv_between[k], self.spatial_attention_blocks[k])   # Apply the temp/spatial transformers
+            x_out = self.apply_attention(x_out, self.temp_attention_blocks[k], self.conv_between[k], self.spatial_attention_blocks[k])   # Apply the temp/spatial attention mecanism
 
             x_in = self.apply_pool_per_t(x_out)     # Max pooling
 
@@ -331,7 +327,7 @@ class UNet_with_attention(nn.Module):
     
 
 
-    # Apply conservative reggriding LR patch wise for the whole frame
+    # Apply conservative reggriding LR patch wise for the whole frame. This is not reccomended as it raises square artifacts
     # Prediction is (B, C, H, W), last frame is (B, 1, 1, H', W') where C = temp_factor
     # Returns modified predictions of shape (B, C, H, W)
     def apply_conservative_strategy_patch_scale(self, prediction, last_frame):
@@ -365,6 +361,10 @@ class UNet_with_attention(nn.Module):
 
         f_output = f(x_block)  # shape: (B, N, C*k*k)
 
+        # If we only have low precip (below the specified treshold), we set f to identity
+        if f_output.max() == 0:
+            f_output = x_block
+
         # Compute the mass reference
         P_LR = y_pixel * self.temp_factor   # (B, N, 1)
 
@@ -377,13 +377,17 @@ class UNet_with_attention(nn.Module):
         return output_final
 
 
-    # Apply conservative reggriding LR pixel wise for the whole frame at the frame scale
+    # Apply conservative reggriding LR pixel wise for the whole frame at the frame scale. This strategy is reccomended
     # Prediction is (B, C, H, W), last frame is (B, 1, 1, H', W') where C = temp_factor
     # Returns modified predictions of shape (B, C, H, W)
     def apply_conservative_strategy_frame_scale(self, prediction, last_frame):
         strategy, f = self.hard_constraint_mass
 
         f_output = f(prediction)  # shape: (B, C, H, W)
+
+        # If we only have low precip (below the specified treshold), we set f to identity
+        if f_output.max() == 0:
+            f_output = prediction
         
         # Compute the mass reference
         P_LR = last_frame.squeeze(2).squeeze(1)   # (B, H', W')
@@ -404,10 +408,9 @@ class UNet_with_attention(nn.Module):
 
     def forward(self, frames, dem, apply_constraint): # frames is a list of coarse inputs, dem is the dem associated to the tile
 
-        # frames = [frame_0, ..., frame_-1] where frame = (B, 1, 1, H, W) & dem = (B, 1, 100, 100)
-        strategy, f = self.hard_constraint_mass
+        strategy, f = self.hard_constraint_mass     # Mass conservation strategy
 
-        ### FIRST STEP
+        ### First step
         # Before anything, if the last image (we seek to downsample) is all zeroes, then we force the predictions to be zero. Otherwise, we pass it to the unet
 
         # Create all outputs to zeros
@@ -415,12 +418,12 @@ class UNet_with_attention(nn.Module):
 
         outputs = torch.zeros(batch_size, self.temp_factor, 100, 100, device=frames[-1].device)  
         
-        # Check if for some sample, the two last input images are all zeros
+        # Check if for some sample, the two last input is all zeros
         all_zero_inp0 = torch.all(frames[-1] == 0, dim=(-2, -1))  # [B]
 
         non_null_mask = ~(all_zero_inp0).squeeze()  # [B], True if not entirely 0
 
-        ### SECOND STEP
+        ### Second step
         # If not 0, pass them to the UNet. The UNet itself never sees any all zeroes frames
         if non_null_mask.any():
             # We only pass the non zero samples
@@ -445,7 +448,7 @@ class UNet_with_attention(nn.Module):
             # Pass it to the UNet
             output_non_null = self.unet_forward(input) # output is [B', self.temp_factor, H, W]
 
-            ### THIRD STEP
+            ### Third ste^p
             # Here we apply (if asked) the hard constraint mass strategy
             if apply_constraint == True:
                 if strategy == "patch-scale":

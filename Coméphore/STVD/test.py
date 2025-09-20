@@ -180,12 +180,12 @@ def plot_legend_row_columns(fig, num_scenarios, n_rows, num_channels, label_padd
 
 
 # Function to plot all the relevant images of one batch and save them
-def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, targets, output_dir, delta, multiple_scenarios,
+def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, targets, output_dir, delta, multiple_scenarios, index_folder,
                 bot_or_top = None, best_worst = False):
 
     os.makedirs(output_dir, exist_ok=True)
     # We plot random samples and the best/worst samples (according to the base_loss).
-    for folder in ["Random", "Lowest", "Best"]:
+    for folder in [f"Random_{index_folder}", "Lowest", "Best"]:
         os.makedirs(os.path.join(output_dir, folder), exist_ok=True)
     
     # We don't plot more than 15 samples
@@ -292,7 +292,7 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         elif bot_or_top == "top":
             name_file = f"Best/Best {i + 1} file"
         else:
-            name_file = f"Random/Random {i + 1} file"
+            name_file = f"Random_{index_folder}/Random {i + 1} file"
 
 
         plt.savefig(os.path.join(output_dir, f"{output_dir}/{name_file}.png"), bbox_inches = "tight")
@@ -353,7 +353,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         temporal_encoder = TemporalEncoder(input_channels=1, embed_dim=256, seq_len=n_inputs).to(device).eval()
 
     # Load the test dataset
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True) 
 
     # Evaluate
     model_deter.eval()
@@ -430,7 +430,8 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         size_quantile = [(quantiles[k+1] - quantiles[k]) for k in range(len(average_array))]
         pitd = np.sqrt(np.sum(((average_array - expected_frequency) ** 2) * size_quantile))
 
-    plot_first_samples = True   # If one want to plot random samples
+    plot_first_samples = 0      
+    batch_to_plot = 3           # How many batch we want to plot
     best_worst_to_plot = 5      # Number of best / worst samples to plot
 
     with torch.no_grad():
@@ -445,10 +446,6 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
         # Loop over the testing set
         for list_low_res, channel, target, time_idx in tqdm(test_loader, desc="Testing"):
-
-            channel, target = channel.to(device), target.to(device)
-            for k in range(len(list_low_res)):
-                list_low_res[k] = list_low_res[k].to(device)
 
             # Compute the output of the deterministic model
             output_deter = model_deter(list_low_res, channel, apply_constraint = True)     
@@ -490,10 +487,10 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
                 total_test_loss = test_loss 
 
             # Plot some random predictions only for the first batch
-            if plot_first_samples == True:
-                save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, 
+            if plot_first_samples < batch_to_plot:
+                save_images(list_low_res, time_idx, B_pred, output_deter, channel, target, output_dir=output_dir_images, index_folder=plot_first_samples, 
                             delta = delta, multiple_scenarios = multiple_scenarios, best_worst = False)
-                plot_first_samples = False
+                plot_first_samples += 1
 
             ### Keep track of the best/worst samples ###
             # Fill the list with the first 5 values
@@ -557,9 +554,9 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
 
     # Plot the best & worst samples
     save_images(get_column(worst_sample, 0), get_column(worst_sample, 1), get_column(worst_sample, 2), get_column(worst_sample, 3), get_column(worst_sample, 4),
-                get_column(worst_sample, 5), bot_or_top="bot", output_dir=output_dir_images, best_worst=True, delta = delta, multiple_scenarios = False)
+                get_column(worst_sample, 5), bot_or_top="bot", output_dir=output_dir_images, best_worst=True, delta = delta, multiple_scenarios = False, index_folder = None)
     save_images(get_column(best_sample, 0), get_column(best_sample, 1), get_column(best_sample, 2), get_column(best_sample, 3), get_column(best_sample, 4),
-                get_column(best_sample, 5), bot_or_top="top", output_dir=output_dir_images, best_worst=True, delta = delta, multiple_scenarios = False)
+                get_column(best_sample, 5), bot_or_top="top", output_dir=output_dir_images, best_worst=True, delta = delta, multiple_scenarios = False, index_folder = None)
 
     # Print the metrics
     avg_test_loss = total_test_loss / len(test_loader)

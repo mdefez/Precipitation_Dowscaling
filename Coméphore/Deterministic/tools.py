@@ -1,14 +1,14 @@
-# This script aims to provide useful functions concerning the CV process
+# This script aims to provide useful functions concerning the normalization process and saving process
 
 
 from torch.utils.data import DataLoader, Dataset
 import torch
 import os, pickle
 
-####################################################################################################################################################################################
-############################################################ NORMALIZATION ########################################################################################################################
-##################################################################################################################################################################################################################
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Get stats from the training set for normalizing
 def get_stats(flatten_data, strategy):
     if strategy == "Standard":
         mean = flatten_data.mean()
@@ -27,6 +27,7 @@ def get_stats(flatten_data, strategy):
         iqr = q3 - q1
         return median, iqr
 
+# Compute the stats for the whole dataset
 def compute_stats(train_dataset, strat_precip, strat_channel):
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
 
@@ -55,7 +56,8 @@ def compute_stats(train_dataset, strat_precip, strat_channel):
 
     return stats_precip, stats_channel
 
-def compute_transformation(train_dataset, strat_precip, strat_channel): # Returns the function to apply at each sample from the training & testing set
+# Returns the function to apply at each sample from the training & testing set
+def compute_transformation(train_dataset, strat_precip, strat_channel): 
 
     list_strat = [strat_precip, strat_channel]
     list_stats = compute_stats(train_dataset, strat_precip, strat_channel)
@@ -79,7 +81,8 @@ def compute_transformation(train_dataset, strat_precip, strat_channel): # Return
 
     return list_transfo, list_stats
 
-def get_transfo(strat, stats): # Useful in CV.py to save the transformation
+# Useful to save the transformation function
+def get_transfo(strat, stats): 
     if strat == "Standard":
         mean, std = stats
         transformation = lambda x: (x - mean) / std
@@ -118,19 +121,22 @@ class TransformedDataset(Dataset):
             
             targets = self.transform_precip(targets)
 
+        # Pass everything to the device
+        channel, targets = channel.to(device), targets.to(device)
+        for k in range(len(low_res_tensors)):
+                low_res_tensors[k] = low_res_tensors[k].to(device)
+
         return low_res_tensors, channel, targets, time_idx
 
 
-####################################################################################################################################################################################
-############################################################ Saving objects ########################################################################################################################
-##################################################################################################################################################################################################################
 
-# Function that saves the model's weights in the file path
+# Function that saves the deterministic model's weights in the file path
 def save_model_deter(weights, name_of_the_run, spatial_factor, temp_factor):
     filepath = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/'
     os.makedirs(filepath, exist_ok=True)
     torch.save({'model_state_dict': weights}, filepath + name_of_the_run + ".pth")
 
+# Function that saves the diffusion model's weights in the file path
 def save_model_diffu(weights, name_of_the_run, spatial_factor, temp_factor):
     filepath = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion/weights/spatial_{spatial_factor}_temp_{temp_factor}/'
     os.makedirs(filepath, exist_ok=True)
@@ -148,6 +154,7 @@ def save_transfo(output_path, best_stats_precip, best_stats_dem, strat_precip, s
     with open(output_path + f"/best_stats_dem_{strat_dem}.pkl", "wb") as f:
         pickle.dump(list_dem, f)
 
+# Load the transformation function
 def load_best_transform(file, strat_precip, strat_dem):
     with open(file + f"/best_stats_precip_{strat_precip}.pkl", "rb") as f:
         stats_precip = pickle.load(f)

@@ -38,9 +38,9 @@ def sample_diffusion(model, scheduler, A_seq, C, temporal_encoder, num_steps, la
             model_input, temporal_embed = setup_input_inference(device, R_t, A_seq, C, temporal_encoder)
             pred_velo = model(model_input, temporal_embed, t)  # (B, C, H, W)
 
-            alpha_t = scheduler.alphas.to(device)[t_step].view(-1, 1, 1, 1)
-            alpha_bar_t = scheduler.alpha_bars.to(device)[t_step].view(-1, 1, 1, 1)
-            beta_t = scheduler.betas.to(device)[t_step].view(-1, 1, 1, 1)
+            alpha_t = scheduler.alphas[t_step].view(-1, 1, 1, 1)
+            alpha_bar_t = scheduler.alpha_bars[t_step].view(-1, 1, 1, 1)
+            beta_t = scheduler.betas[t_step].view(-1, 1, 1, 1)
 
             # Compute epsilon directly from predicted velocity and R_t
             epsilon_pred = torch.sqrt(alpha_bar_t) * pred_velo + torch.sqrt(1 - alpha_bar_t) * R_t
