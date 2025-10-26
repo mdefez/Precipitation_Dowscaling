@@ -9,8 +9,10 @@ from rasterio.plot import show
 import pandas as pd
 import cartopy.feature as cfeature
 
+# Import config
+from Coméphore.Config import working_directory, projected_data_path
 
-file_path = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/2024/COMEPHORE_2024_1/2024/Projected_2024010718_RR.gtif"
+file_path = projected_data_path + "2024/COMEPHORE_2024_1/2024/Projected_2024010718_RR.gtif"
 
 with rasterio.open(file_path, "r") as src:
     # We read the image
@@ -52,5 +54,5 @@ with rasterio.open(file_path, "r") as src:
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
     plt.title(date)
-    plt.savefig(f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Comephore_preprocess/Images/example.png")
+    plt.savefig(working_directory + f"/Comephore_preprocess/Images/example.png")
     plt.close()

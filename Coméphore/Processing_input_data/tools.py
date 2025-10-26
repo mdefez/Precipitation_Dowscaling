@@ -6,18 +6,20 @@ import os
 import warnings
 import re
 from typing import Union
-from scipy.ndimage import gaussian_filter, uniform_filter, distance_transform_edt
+from scipy.ndimage import uniform_filter, distance_transform_edt
 import rasterio
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from matplotlib.backends.backend_pdf import PdfPages
 from scipy.interpolate import griddata
 import geopandas as gpd
 from shapely.geometry import Point
 
+# Import config
+from Coméphore.Config import working_directory, data_directory, projected_data_path
+
 # Example of path to projected data
-path_projected = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/test/9829/2019/COMEPHORE_2019_2/2019/Projected_2019020918_RR.gtif"
+path_projected = projected_data_path + f"test/9829/2019/COMEPHORE_2019_2/2019/Projected_2019020918_RR.gtif"
 
 
 #################################################################################################################################
@@ -30,7 +32,7 @@ def get_path(timestep):
     year = timestep[:4]
     month = int(timestep[4:6])
 
-    path = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/{year}/COMEPHORE_{year}_{month}/{year}/Projected_{timestep}_RR.gtif"
+    path = projected_data_path + f"{year}/COMEPHORE_{year}_{month}/{year}/Projected_{timestep}_RR.gtif"
     return path
 
 #################################################################################################################################
@@ -296,7 +298,7 @@ def downsampling_arr(arr, factor):
     return arr_downsampled
 
 # This function extracts a gpd object representing France
-def get_france_geo_points(spatial_factor, path_shp = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Processing_input_data/filter_france"):
+def get_france_geo_points(spatial_factor, path_shp = working_directory + "Processing_input_data/filter_france"):
 
     # This loads french borders with a slight margin (depending on the SR factor)
     world = gpd.read_file(path_shp)
@@ -347,7 +349,7 @@ def set_to_nan(df, list_nan):
 
 # Blur and spatially downsample all the samples
 def blur_and_spatial_downsampling(input_directory, output_directory, spatial_factor, area = None):
-    france = get_france_geo_points(spatial_factor, path_shp="/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Processing_input_data/filter_france")
+    france = get_france_geo_points(spatial_factor, path_shp=working_directory + "Processing_input_data/filter_france")
     os.makedirs(output_directory, exist_ok=True)
 
     # We sort the folder so that the function deals with file accordingly to the timestep it represents

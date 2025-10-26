@@ -8,21 +8,18 @@ import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
-import sys
 from tqdm import tqdm
 from torch.optim.lr_scheduler import LinearLR, SequentialLR
 
 
 # Import deterministic model
-sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic')
-from UNet_attention import UNet_with_attention 
-from baseline import nearest_neighbor, bicubic
-import tools as tool
+from Coméphore.Deterministic.UNet_attention import UNet_with_attention 
+from Coméphore.Deterministic.baseline import nearest_neighbor, bicubic
+import Coméphore.Deterministic.tools as tool
 
 # Import diffusion model
-sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
-from diffusion_model import UNetforDiffusion, TemporalEncoder, DiffusionScheduler
-from tools_diffu import setup_input, bicubic_A_seq
+from Coméphore.Diffusion.diffusion_model import UNetforDiffusion, TemporalEncoder, DiffusionScheduler
+from Coméphore.Diffusion.tools_diffu import setup_input, bicubic_A_seq
 
 # To monitor the training
 import wandb
@@ -139,7 +136,7 @@ def train(train_dataset, test_dataset, batch_size, epochs, strategy_scheduler, l
                 loss = criterion(pred_velo, true_velo)      # Compute the loss (MSE over the true / predicted velocity)
 
                 try:
-                    if epoch_mse_deter != -1 and epoch_mse_deter <= epoch: # Adapt (if asked) the loss function to force the deterministic UNet to be decent
+                    if epoch_mse_deter != -1 and epoch_mse_deter >= epoch: # Adapt (if asked) the loss function to force the deterministic UNet to be decent
                         loss += lambda_mse_deter * nn.MSELoss()(output_deter, target)
                 except (NameError, UnboundLocalError):
                     pass 

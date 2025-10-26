@@ -16,6 +16,9 @@ warnings.filterwarnings(
     message="Importing `spectral_angle_mapper` from `torchmetrics.functional` was deprecated"
 )
 
+# Import config
+from Coméphore.Config import working_directory, data_directory
+
     
 # We use this loss function as a metric on the training set. It allows to compute averaged or marginal loss over the batch
 class LossTest(nn.Module):          
@@ -251,7 +254,7 @@ class PITD(nn.Module):
         F_X_X = np.searchsorted(pred_sorted, pred_sorted, side='right') / len(pred_sorted)
 
         # Compute histogram. Get the pre-computed quantiles from the WHOLE training set (See Coméphore/STVD/explore_dataset.py)
-        df = pd.read_csv("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Data_analysis/8_quantiles.csv")
+        df = pd.read_csv(working_directory + "/STVD/Data_analysis/8_quantiles.csv")
         quantiles = np.asarray(df["quantile"])                      # Quantiles of interest, computed from the training set
 
         # If the target frames are all zeros, then the output is null as well and the predictions are perfect

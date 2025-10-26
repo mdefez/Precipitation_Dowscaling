@@ -15,10 +15,12 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import sys, os
 
-sys.path.append("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Processing_input_data")
-import tools as tool
+# Import config
+from Coméphore.Config import working_directory, data_directory, projected_data_path, topography_directory
 
-ex_file = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/2020/COMEPHORE_2020_2/2020/Projected_2020021510_RR.gtif"
+import Coméphore.Processing_input_data.tools as tool
+
+ex_file = projected_data_path + "2020/COMEPHORE_2020_2/2020/Projected_2020021510_RR.gtif"
 
 # Load a sample to compute locations
 with rasterio.open(ex_file, 'r') as src:
@@ -76,7 +78,7 @@ def get_a_tile(hor, vert, timestep):
     return tile
 
 def get_dem(hor, vert):
-    with rasterio.open("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/low_res.tif", 'r') as src:
+    with rasterio.open(topography_directory + "low_res.tif", 'r') as src:
         arr = np.array(src.read(1))
         idx_row, idx_column = dict_coord[f"horizontal_{hor}_vertical_{vert}"][0], dict_coord[f"horizontal_{hor}_vertical_{vert}"][1]
 
@@ -135,11 +137,11 @@ def save_input_data(output_folder, year, spatial_factor, temp_factor): # Usually
         for vert in range(nb_tile_vertical):
             print(hor, vert)
             # Get the dem file
-            input_folder = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data/{year}/tile_hor_{hor}_vert_{vert}"
+            input_folder = data_directory + f"target_data/{year}/tile_hor_{hor}_vert_{vert}"
             output_folder_tile = os.path.join(output_folder, f"spatial_{spatial_factor}_temp_{temp_factor}", year, f"tile_hor_{hor}_vert_{vert}")
 
             tool.process_input(input_folder = input_folder, 
-                               interm_folder = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/interm_data/spatial{spatial_factor}_temp_{temp_factor}/{year}/tile_hor_{hor}_vert_{vert}",
+                               interm_folder = data_directory + f"interm_data/spatial{spatial_factor}_temp_{temp_factor}/{year}/tile_hor_{hor}_vert_{vert}",
                                  output_folder = output_folder_tile, temp_factor = temp_factor, spatial_factor = spatial_factor,
                                  area = "RNB")
 
@@ -162,15 +164,15 @@ def save_dem(output_folder):
 def plot_example():
     fig, ax = plt.subplots(figsize=(6, 4))  
 
-    input_data = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/input_data/2023/tile_hor_0_vert_0/beggining_2023010512_temp_factor_6_spatial_factor_25.npy"
-    output_data = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/RNB/target_data/2023/tile_hor_0_vert_0/2023010512.npy"
+    input_data = data_directory + "input_data/2023/tile_hor_0_vert_0/beggining_2023010512_temp_factor_6_spatial_factor_25.npy"
+    output_data = data_directory + "target_data/2023/tile_hor_0_vert_0/2023010512.npy"
     # Plotting the heatmap
     im = ax.imshow(np.load(output_data), origin='upper', cmap='viridis')
 
 
     plt.colorbar(im, ax=ax, label=f"Precipitation during the past hour(s) (mm)", pad = 0.1)
     plt.title(output_data.split("/")[-1])
-    plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/CV_pipeline/Images/target.png")
+    plt.savefig(working_directory + "CV_pipeline/Images/target.png")
     plt.close()
 
     fig, ax = plt.subplots(figsize=(6, 4))  
@@ -179,7 +181,7 @@ def plot_example():
 
     plt.colorbar(im, ax=ax, label=f"Precipitation during the past hour(s) (mm)", pad = 0.1)
     plt.title(input_data.split("/")[-1])
-    plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/CV_pipeline/Images/low_res.png")
+    plt.savefig(working_directory + "CV_pipeline/Images/low_res.png")
     plt.close()
 
 # plot_example()

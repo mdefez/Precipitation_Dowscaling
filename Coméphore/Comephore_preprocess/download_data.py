@@ -5,6 +5,9 @@ import requests
 import os
 import tarfile
 
+# Import config
+from Coméphore.Config import working_directory, data_directory, original_data_path
+
 dataset_id = "669e23a7ce052a9e8521b75e" #ID of the comephore dataset
 api_url = f"https://www.data.gouv.fr/api/1/datasets/{dataset_id}/"
 
@@ -15,7 +18,7 @@ data = response.json()
 year_to_download = 2023
 
 # Path to the uploading file
-path_upload = "/work/FAC/FGSE/IDYST/tbeucler/downscaling/raw_data/Comephore/Original_data"
+path_upload = original_data_path
 
 # Download files
 for resource in data["resources"]:

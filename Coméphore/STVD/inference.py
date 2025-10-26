@@ -5,8 +5,7 @@ from tqdm import tqdm
 import sys
 
 # Import functions from other files
-sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
-from tools_diffu import setup_input_inference, apply_conservative_regridding_final_output
+from Coméphore.Diffusion.tools_diffu import setup_input_inference, apply_conservative_regridding_final_output
 
 
 @torch.no_grad()

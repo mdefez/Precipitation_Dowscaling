@@ -4,8 +4,11 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from rasterio.transform import xy
 
+# Import config
+from Coméphore.Config import working_directory, data_directory, topography_directory
+
 # Charger le fichier .tif
-with rasterio.open("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/low_res.tif") as src:
+with rasterio.open(topography_directory + "low_res.tif") as src:
     image = src.read(1)  # Lire la première bande
     width = src.width
     height = src.height
@@ -34,6 +37,6 @@ with rasterio.open("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation
     ax.gridlines(draw_labels=True, linestyle = ":", linewidth = .5)
 
     plt.title("DEM")
-    plt.savefig("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/DEM_low_res.png")
+    plt.savefig(topography_directory + "DEM_low_res.png")
     plt.close()
 

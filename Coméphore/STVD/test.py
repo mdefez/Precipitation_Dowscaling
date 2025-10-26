@@ -2,25 +2,25 @@
 # It takes as input a testing dataset, compute metrics and plots some predictions
 
 import torch
-import sys
+
+# Import config
+from Coméphore.Config import working_directory, data_directory
 
 # Import functions from other files
-sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic')
-sys.path.append('/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion')
 
-from UNet_attention import UNet_with_attention
-from diffusion_model import UNetforDiffusion, DiffusionScheduler, TemporalEncoder
-from tools_diffu import bicubic_A_seq
+from Coméphore.Deterministic.UNet_attention import UNet_with_attention
+from Coméphore.Diffusion.diffusion_model import UNetforDiffusion, DiffusionScheduler, TemporalEncoder
+from Coméphore.Diffusion.tools_diffu import bicubic_A_seq
 from torch.utils.data import DataLoader
 import os 
 import matplotlib.pyplot as plt
-from loss import PITD
+from Coméphore.Deterministic.loss import PITD
 import matplotlib.colors as mcolors
-from baseline import nearest_neighbor, bicubic
+from Coméphore.Deterministic.baseline import nearest_neighbor, bicubic
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 import numpy as np
-from inference import sample_diffusion
+from Coméphore.STVD.inference import sample_diffusion
 from tqdm import tqdm
 import pandas as pd
 import matplotlib.patches as patches
@@ -311,7 +311,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
          criterion, batch_size, asked_model, model_parameters, delta, n_inputs, model_parameters_diffusion, start_time):
     
     # Folder where one should save the plots
-    output_dir_images = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
+    output_dir_images = working_directory + f'/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}'
 
     print("Loading deterministic model")
 
@@ -328,8 +328,8 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         model_deter.to(device)
 
     # Filepath to the .pth file, where are stored the model's weights
-    filepath_deter = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
-    filepath_diffu = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
+    filepath_deter = working_directory + f'/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
+    filepath_diffu = working_directory + f'/Diffusion/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
 
 
     if asked_model not in ["bicubic", "nearest_neighbor"]: # If the model is trainable, load the weights
@@ -402,7 +402,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         average_array = np.mean(values, axis=0)
 
         # Get the quantiles
-        df = pd.read_csv("/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Data_analysis/8_quantiles.csv")
+        df = pd.read_csv(working_directory + "/STVD/Data_analysis/8_quantiles.csv")
         quantiles = np.asarray(df["quantile"])                      # Quantiles of interest, computed from the training set
 
         plt.figure(figsize=(8, 5))
@@ -469,7 +469,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
             # Plot PIT and compute marginals PITD (only for the first batch)
             if ploted_sample_pitd == False:
                 PITD().plot_channels(list_output = B_pred, target = target, 
-                               plot_path = f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}/PITD/")
+                               plot_path = working_directory + f"/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}/PITD/")
                 ploted_sample_pitd = True
 
             # Compute CRPS & PITD (only if we use a probabilistic approach ie the diffusion model)
@@ -564,7 +564,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
     PITD_metric = PITD_metric / len(test_loader)
 
     # Plot the average PITD
-    average_PITD(dict_pdf, f"/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}/PITD/average.png")
+    average_PITD(dict_pdf, working_directory + f"/STVD/Images/spatial_{spatial_factor}_temp_{temp_factor}/{asked_model}/{name_of_the_run}/PITD/average.png")
 
     print(f"Test Loss: {avg_test_loss} for the following metrics \n{criterion.name_metric}")
     print(f"Mean PITD = {PITD_metric}")

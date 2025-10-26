@@ -5,6 +5,9 @@ from torch.utils.data import DataLoader, Dataset
 import torch
 import os, pickle
 
+# Import config
+from Coméphore.Config import working_directory, data_directory
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -132,13 +135,13 @@ class TransformedDataset(Dataset):
 
 # Function that saves the deterministic model's weights in the file path
 def save_model_deter(weights, name_of_the_run, spatial_factor, temp_factor):
-    filepath = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/'
+    filepath = working_directory + f'/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/'
     os.makedirs(filepath, exist_ok=True)
     torch.save({'model_state_dict': weights}, filepath + name_of_the_run + ".pth")
 
 # Function that saves the diffusion model's weights in the file path
 def save_model_diffu(weights, name_of_the_run, spatial_factor, temp_factor):
-    filepath = f'/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/Coméphore/Diffusion/weights/spatial_{spatial_factor}_temp_{temp_factor}/'
+    filepath = working_directory + f'/Diffusion/weights/spatial_{spatial_factor}_temp_{temp_factor}/'
     os.makedirs(filepath, exist_ok=True)
     torch.save({'model_state_dict': weights}, filepath + name_of_the_run + ".pth")
 

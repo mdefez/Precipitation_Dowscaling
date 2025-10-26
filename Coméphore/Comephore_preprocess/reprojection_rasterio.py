@@ -5,6 +5,9 @@ import rasterio.warp
 import os
 import re
 
+# Import config
+from Coméphore.Config import original_data_path, projected_data_path
+
 # Original projection (Coméphore)
 
 # We define multiple strategies to project the data
@@ -46,7 +49,7 @@ for k in range(1, 13): # Set to 13 to convert all the data, to 2 just to test on
     year_month_to_reproject = f"{year_to_reproject}/COMEPHORE_{year_to_reproject}_{k}/{year_to_reproject}"
 
     # List all files to reproject
-    source = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/raw_data/Comephore/Original_data/{year_month_to_reproject}"
+    source = original_data_path + f"/{year_month_to_reproject}"
     all_files = os.listdir(source)
     # We only keep the RR (measurement data)
     all_files = [x for x in all_files if re.search("_RR", x) != None and re.search("xml", x) == None]
@@ -61,7 +64,7 @@ for k in range(1, 13): # Set to 13 to convert all the data, to 2 just to test on
             )
 
             # Upload the reprojected data in the destination folder, that we create if it does not exist
-            destination = f"/work/FAC/FGSE/IDYST/tbeucler/downscaling/mdefez/Comephore/Projected_data/{year_month_to_reproject}"
+            destination = projected_data_path + f"{year_month_to_reproject}"
             os.makedirs(destination, exist_ok=True)
 
             with rasterio.open(destination + "/" + "Projected_" + file, "w", driver='GTiff', height=height, width=width,

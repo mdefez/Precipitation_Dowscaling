@@ -5,17 +5,20 @@ import rasterio
 import numpy as np
 from rasterio.enums import Resampling
 
+# Import config
+from Coméphore.Config import working_directory, data_directory, topography_directory
+
 ### Decompressing the file
-input_folder = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/rasters_COP90.tar.gz"
-output_folder = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo"
+input_folder = topography_directory + "rasters_COP90.tar.gz"
+output_folder = topography_directory
 
 with tarfile.open(input_folder, "r:gz") as archive:
     archive.extractall(path=output_folder)
 
 ### Downsampling it 
 
-input_file = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/output_hh.tif"
-output_file = "/work/FAC/FGSE/IDYST/tbeucler/default/maxdefez/Precipitation_Dowscaling/DEM_open_topo/low_res.tif"
+input_file = topography_directory + "output_hh.tif"
+output_file = topography_directory + "low_res.tif"
 
 # Résolution cible en degrés (par exemple 0.01° par pixel)
 target_resolution_deg = 0.011376662713563385  # en degrés (pour obtenir environ 1 km à l'équateur)

@@ -208,6 +208,9 @@ class LocalSpatialAttention(nn.Module):
     def forward(self, x):
         B, C, H, W = x.shape
 
+        if self.window_size == 1:       # No attention
+            return x
+
         # Unfold to get local windows for each pixel
         patches = F.unfold(x, kernel_size = self.window_size, padding = self.window_size // 2)  # shape: (B, C*n², H*W) where n is the window_size
 
