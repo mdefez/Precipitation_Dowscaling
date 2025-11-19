@@ -1,6 +1,5 @@
 # The goal of this script is to implement a UNet class with temporal/spatial attention
 
-from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -351,7 +350,10 @@ class UNet_with_attention(nn.Module):
 
         return X_out
 
-
+##############################################################################################################################
+    # NB : Do not use patch-scale, it should be deleted entirely
+##############################################################################################################################
+ 
     # This function apply conservative regridding for one patch (temp_factor * spatial_factor * spatial_factor) VS low res pixel
     # x_block is (B, N, C*k*k) where C = temp_factor, y_pixel is (B, N, 1). We should perform the transformation for every B & N 
     # output should be the modified x_block (B, N, C*k*k)
@@ -384,7 +386,7 @@ class UNet_with_attention(nn.Module):
         strategy, f = self.hard_constraint_mass
 
         f_output = f(prediction)  # shape: (B, C, H, W)
-
+        
         # If we only have low precip (below the specified treshold), we set f to identity
         if f_output.max() == 0:
             f_output = prediction

@@ -40,13 +40,13 @@ def main_function():
     spatial_factor = 25
 
     patience_threshold = 8      # Stop training if there is no improvement for patience_threshold validating epochs
-    n_inputs = 2                # Ordered frames to take into account as input, the last one is the image to downscale
+    n_inputs = 3                # Ordered frames to take into account as input, the last one is the image to downscale
     delta = None                # If we want to compute deltas or the true target
 
-    n_scenarios = 3     # Number of scenarios to generate
+    n_scenarios = 5     # Number of scenarios to generate
 
     n_days_train = 28           # Only first n_days are used for each month. Set this to an integer between 2 and 28
-    n_days_test = 28            # Same for n_test. 
+    n_days_test = 28           # Same for n_test. 
 
     # Choose wether we want to train/test/both and normalize
     training = True 
@@ -57,7 +57,7 @@ def main_function():
 
     # Training features
     batch_size = 12
-    epochs = 120
+    epochs = 80
     learning_rate = 1e-4
 
     # Data directories
@@ -90,27 +90,32 @@ def main_function():
 
     available_strategy_mass = [None, ("a function type that operates on tensors", "image or patch scale")] # The function should apply element wise for tensors
 
-    # Function to apply element by element to the tensor. Be careful, it should not be zero when x = 0 and it should not diverge when x is big
-
-    threshold_function = 0.025    # Threshold for the ReLU
-
     # Function for the deterministic model
+    threshold_function = 0.025    # Threshold for the ReLU
+    epsilon_for_positivity = 1e-8
+
     def f_mass_deter(x): 
         y = x - threshold_function
-        relu = torch.clamp(y, min = 0)
+        relu = torch.clamp(y, min = epsilon_for_positivity)
+        relu_with_function = torch.square(relu)
 
-        return torch.sqrt(relu)
+        final_relu = torch.clamp(relu_with_function - threshold_function, min = 0)
+
+        return final_relu
 
     treshold_constraint_deter = 20 # Epoch where we should begin to apply conservative transformation for the deterministic model
 
     # Function for the diffusion model
     def f_mass_diffu(x): 
         y = x - threshold_function
-        relu = torch.clamp(y, min = 0)
+        relu = torch.clamp(y, min = epsilon_for_positivity)
+        relu_with_function = torch.square(relu)
 
-        return torch.sqrt(relu)
+        final_relu = torch.clamp(relu_with_function - threshold_function, min = 0)
 
-    name_function = "sqrt_relu_.025"        # Custom label to add to the name of the run. You can specify the shape of the mass conservation function for example
+        return final_relu
+
+    name_function = "relu_sqrt_relu_.025"        # Custom label to add to the name of the run. You can specify the shape of the mass conservation function for example
 
     ##### Deterministic model #####
 
@@ -131,7 +136,7 @@ def main_function():
     use_diffusion = True        # If we want to use diffusion 
 
     nb_steps = 1000                         # Number of denoising steps
-    beta = (1e-4, 0.3, "quadratic")         # beta_start, beta_end, way to go from beta_min to beta_max
+    beta = (1e-4, 0.35, "quadratic")         # beta_start, beta_end, way to go from beta_min to beta_max
 
     conservative_mass_diffusion = ("image-scale", f_mass_diffu)     # Scale to apply conservation (Image scale is HIGLY reccomended) + Function for the multiplicative approach
 

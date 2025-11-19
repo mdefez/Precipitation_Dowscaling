@@ -1,4 +1,4 @@
-# Precipitation_Dowscaling
+# Precipitation_Downscaling
 
 ## Scope of the project
 The goal of this project is to apply Video Super-Resolution algorithm to precipitation data.
