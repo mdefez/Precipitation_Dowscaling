@@ -123,25 +123,24 @@ def apply_conservative_regridding_final_output(B_pred, LR_input, spatial_factor,
     def apply_conservative_strategy_frame_scale(prediction, last_frame):
         strategy, f = hard_constraint_mass
 
-        f_output = f(prediction)  # shape: (B, C, H, W)
+        f_output = f(prediction)  # shape: (B, C, H, W). At this point f_output can be null for a whole sample (C, H, W) which is not convenient for the following operations. In that case we simply don't apply the function
 
-        # If we only have low precip (below the specified treshold), we set f to identity
-        if f_output.max() == 0:
-            f_output = prediction
-
+        mask = (f_output.abs() < 1e-6).all(dim=(1, 2, 3), keepdim=True)   # shape : (B, 1, 1, 1)
+        f_output_corrected = torch.where(mask, prediction, f_output)
+        
         # Compute the mass reference
         P_LR = last_frame   # (B, H', W')
         P_LR = P_LR.sum(dim = (1, 2))       # (B)
 
         # Compute the sum at the denominator for the current predictions
-        sum_f = f_output.sum(dim=(1, 2, 3))   #  (B)
+        sum_f = f_output_corrected.sum(dim=(1, 2, 3))   #  (B)
 
         # Make everything homogenous
         P_LR = P_LR.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
         sum_f = sum_f.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
 
         # Compute the final (constrained) predictions
-        output_final = f_output * (P_LR * temp_factor * (spatial_factor ** 2) / sum_f)   # shape: (B, C, H, W)
+        output_final = f_output_corrected * (P_LR * temp_factor * (spatial_factor ** 2) / sum_f)   # shape: (B, C, H, W)
 
         return output_final
     
