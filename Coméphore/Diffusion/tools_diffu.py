@@ -125,22 +125,36 @@ def apply_conservative_regridding_final_output(B_pred, LR_input, spatial_factor,
 
         f_output = f(prediction)  # shape: (B, C, H, W). At this point f_output can be null for a whole sample (C, H, W) which is not convenient for the following operations. In that case we simply don't apply the function
 
-        mask = (f_output.abs() < 1e-6).all(dim=(1, 2, 3), keepdim=True)   # shape : (B, 1, 1, 1)
-        f_output_corrected = torch.where(mask, prediction, f_output)
         
         # Compute the mass reference
-        P_LR = last_frame   # (B, H', W')
+        P_LR = last_frame.squeeze(2).squeeze(1)   # (B, H', W')
         P_LR = P_LR.sum(dim = (1, 2))       # (B)
 
         # Compute the sum at the denominator for the current predictions
-        sum_f = f_output_corrected.sum(dim=(1, 2, 3))   #  (B)
+        sum_f = f_output.sum(dim=(1, 2, 3))   #  (B)
 
         # Make everything homogenous
         P_LR = P_LR.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
         sum_f = sum_f.unsqueeze(1).unsqueeze(2).unsqueeze(3)        # (B, 1, 1, 1)
 
+        mask = (sum_f > 1e-10).squeeze()      # One select only the B' non null batch
+
+        P_lr_non_null = P_LR[mask]      
+        f_output_non_null = f_output[mask]
+        sum_non_null = sum_f[mask]
+
+        print(P_lr_non_null.shape)
+        print(f_output_non_null.shape)
+        print(sum_non_null.shape)
+
         # Compute the final (constrained) predictions
-        output_final = f_output_corrected * (P_LR * temp_factor * (spatial_factor ** 2) / sum_f)   # shape: (B, C, H, W)
+        output_final_non_null = f_output_non_null * (P_lr_non_null * temp_factor * (spatial_factor ** 2) / sum_non_null)   # shape: (B', C, H, W)
+        output_final_null = prediction[~mask]
+
+        output_final = torch.empty_like(prediction)
+
+        output_final[mask] = output_final_non_null
+        output_final[~mask] = output_final_null
 
         return output_final
     

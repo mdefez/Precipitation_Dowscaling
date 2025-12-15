@@ -36,14 +36,14 @@ def main_function():
     ####################################################################################################################################################################################
 
     # Super resolution factors
-    temp_factor = 6
-    spatial_factor = 25
+    temp_factor = 3
+    spatial_factor = 10
 
-    patience_threshold = 6      # Stop training if there is no improvement for patience_threshold validating epochs
-    n_inputs = 3                # Ordered frames to take into account as input, the last one is the image to downscale
+    patience_threshold = 8      # Stop training if there is no improvement for patience_threshold validating epochs
+    n_inputs = 1                # Ordered frames to take into account as input, the last one is the image to downscale
     delta = None                # If we want to compute deltas or the true target
 
-    n_scenarios = 1     # Number of scenarios to generate
+    n_scenarios = 5     # Number of scenarios to generate
 
     n_days_train = 28           # Only first n_days are used for each month. Set this to an integer between 2 and 28
     n_days_test = 28           # Same for n_test. 
@@ -57,7 +57,7 @@ def main_function():
 
     # Training features
     batch_size = 12
-    epochs = 80
+    epochs = 120
     learning_rate = 1e-4
 
     # Data directories
@@ -77,8 +77,8 @@ def main_function():
 
     list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
 
-    strat_attention_diffu = ["time", "space"]
-    strat_attention_deter = ["time", "space"]
+    strat_attention_diffu = [None]
+    strat_attention_deter = [None]
 
     nb_heads = 4                        # Number of attention heads used during the Multi Head Attention (both for time & space)
     window_size = [3, 3, 1, 1, 1]       # window size for spatial attention. EVERY ELEMENT SHOULD BE ODD
@@ -91,12 +91,12 @@ def main_function():
     available_strategy_mass = [None, ("a function type that operates on tensors", "image or patch scale")] # The function should apply element wise for tensors
 
     # Function for the deterministic model
-    threshold_function = 0.015    # Threshold for the ReLU
-    epsilon_for_positivity = 1e-8
+    threshold_function = 0.02    # Threshold for the ReLU
+    epsilon_for_positivity = 1e-10
 
     def f_mass_deter(x): 
         relu = torch.clamp(x, min = epsilon_for_positivity)              # Make sure of the positivity
-        relu_with_function = torch.sqrt(relu)
+        relu_with_function = relu
 
         final_relu = torch.clamp(relu_with_function - threshold_function, min = 0)      # Get rid of too small values
 
@@ -107,19 +107,19 @@ def main_function():
     # Function for the diffusion model
     def f_mass_diffu(x): 
         relu = torch.clamp(x, min = epsilon_for_positivity)              # Make sure of the positivity
-        relu_with_function = torch.sqrt(relu)
+        relu_with_function = relu
 
         final_relu = torch.clamp(relu_with_function - threshold_function, min = 0)      # Get rid of too small values
 
         return final_relu
 
-    name_function = "sqrt_relu.015"        # Custom label to add to the name of the run. You can specify the shape of the mass conservation function for example
+    name_function = "id_relu.02"        # Custom label to add to the name of the run. You can specify the shape of the mass conservation function for example
 
     ##### Deterministic model #####
 
     # For the first n epochs, we add the MSE of the deterministic model (output VS target) in the loss function to coerce the deter to provide decent predictions
     lambda_mse = 1
-    epoch_stop_mse_deter = 25 # Epoch where we should stop adding the MSE to the global loss function. Set to -1 if one doesn't want to use it
+    epoch_stop_mse_deter = 15 # Epoch where we should stop adding the MSE to the global loss function. Set to -1 if one doesn't want to use it
     mse_deter = (lambda_mse, epoch_stop_mse_deter)
 
     # Load pre train deterministic model
@@ -134,7 +134,7 @@ def main_function():
     use_diffusion = True        # If we want to use diffusion 
 
     nb_steps = 1000                         # Number of denoising steps
-    beta = (1e-4, 0.35, "quadratic")         # beta_start, beta_end, way to go from beta_min to beta_max
+    beta = (1e-4, 0.02, "linear")         # beta_start, beta_end, way to go from beta_min to beta_max
 
     conservative_mass_diffusion = ("image-scale", f_mass_diffu)     # Scale to apply conservation (Image scale is HIGLY reccomended) + Function for the multiplicative approach
 
