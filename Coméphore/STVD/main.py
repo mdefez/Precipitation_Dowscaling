@@ -40,16 +40,16 @@ def main_function():
     spatial_factor = 10
 
     patience_threshold = 8      # Stop training if there is no improvement for patience_threshold validating epochs
-    n_inputs = 1                # Ordered frames to take into account as input, the last one is the image to downscale
+    n_inputs = 5                # Ordered frames to take into account as input, the last one is the image to downscale
     delta = None                # If we want to compute deltas or the true target
 
-    n_scenarios = 5     # Number of scenarios to generate
+    n_scenarios = 3     # Number of scenarios to generate
 
     n_days_train = 28           # Only first n_days are used for each month. Set this to an integer between 2 and 28
     n_days_test = 28           # Same for n_test. 
 
     # Choose wether we want to train/test/both and normalize
-    training = True 
+    training = False 
     normalizing = False         # If False, the code will import the last normalizer saved
     testing = True 
 
@@ -77,8 +77,8 @@ def main_function():
 
     list_strat_attention = [["time", "space"], ["space"], ["time"], [None]]     # What type of attention to compute
 
-    strat_attention_diffu = [None]
-    strat_attention_deter = [None]
+    strat_attention_diffu = ["time", "space"]
+    strat_attention_deter = ["time", "space"]
 
     nb_heads = 4                        # Number of attention heads used during the Multi Head Attention (both for time & space)
     window_size = [3, 3, 1, 1, 1]       # window size for spatial attention. EVERY ELEMENT SHOULD BE ODD

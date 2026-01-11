@@ -29,10 +29,8 @@ import time
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Function to plot a single DEM/Precipitation/Variance image
-def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = False):
+def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = False, plot_title = False):
     plt.subplot(nb_slot, nb_column, position)
-    plt.subplots_adjust(hspace=0.4) 
-    plt.subplots_adjust(wspace=0.5) 
 
     # Custom colormap
     colors = ['white', 'blue', 'yellow']
@@ -43,7 +41,8 @@ def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = Fals
         if delta == True:
             vmin, vmax = -0.1, 0.1
         plt.imshow(image, cmap=custom_cmap, vmin = vmin, vmax = vmax)
-        plt.colorbar(label = "Scaled Precip")
+        if position == 2:
+            plt.colorbar(label = "Scaled Precip")
 
         # Remove axis and plot a dark square along the plot
         ax = plt.gca()
@@ -83,7 +82,8 @@ def plot_img(image, is_precip, nb_slot, position, title, nb_column, delta = Fals
             spine.set_linewidth(0.5)
             spine.set_visible(True)
 
-    plt.title(title, fontsize = 18)
+    if plot_title:
+        plt.title(title, fontsize = 22)
 
 # Function to plot a precip histogram
 def plot_histo(pred, target, title, nb_slot, nb_column, position):
@@ -91,16 +91,13 @@ def plot_histo(pred, target, title, nb_slot, nb_column, position):
         return None
     
     plt.subplot(nb_slot, nb_column, position)
-    plt.subplots_adjust(hspace=0.4) 
-    plt.subplots_adjust(wspace=0.5) 
 
     flat_pred = pred.flatten()
     flat_target = target.flatten()
 
     sns.histplot(flat_pred, color='steelblue', label='Prediction', binrange=(0, 1), bins=30, stat='density', alpha =.5)
     sns.histplot(flat_target, color='orange', label='Target', binrange=(0, 1), bins=30, stat='density', alpha = .5)
-    plt.title(title, fontsize = 18)
-    plt.xlabel("Precipitation")
+    #plt.title(title, fontsize = 18)
     plt.ylabel("Frequency")
     plt.legend()
     plt.show()
@@ -113,10 +110,8 @@ def plot_legend_row_columns(fig, num_scenarios, n_rows, num_channels, label_padd
     n_cols = 1 + num_scenarios + 1 + 1  # Deterministic prediction + scenarios + target + histogram
     column_labels = ["Deterministic prediction"]
     for k in range(num_scenarios):
-        column_labels.append(f"Scenario {k+1}")
-    if num_scenarios >= 2:      # If we have multiple scenarios, we expect a variance plot
-        n_cols += 1
-        column_labels.append("Variance")
+        column_labels.append(f"Model prediction\nScenario {k+1}")
+
     column_labels.append("Target")
     column_labels.append("Target & Prediction distribution")
 
@@ -128,8 +123,8 @@ def plot_legend_row_columns(fig, num_scenarios, n_rows, num_channels, label_padd
     axes = fig.get_axes()
 
     # Add custom text at bottom of each column
-    begin_horizontal = (axes[0].get_position().x0 + axes[0].get_position().x1) / 2
-    horizontal_step = abs(axes[0].get_position().x0 - axes[2].get_position().x0)
+    begin_horizontal = (axes[0].get_position().x0 + axes[0].get_position().x1) / 2 + 0.01
+    horizontal_step = abs(axes[0].get_position().x0 - axes[2].get_position().x0) - 0.003
     for k in range(n_cols):
         # place text centered under the bottom plot of each column
         fig.text(
@@ -139,7 +134,7 @@ def plot_legend_row_columns(fig, num_scenarios, n_rows, num_channels, label_padd
             ha='center',
             va='bottom',
             fontsize = 22,
-            color = "#e12020"
+            color = "#000000"
         )
 
     # Add custom text to the left of each row
@@ -148,31 +143,17 @@ def plot_legend_row_columns(fig, num_scenarios, n_rows, num_channels, label_padd
     for k in range(n_rows):
         # place text vertically centered beside leftmost plot in the row
         fig.text(
-            x=0.05,  # near left edge of figure
+            x=0.1,  # near left edge of figure
             y=begin_vertical - k*vertical_step,
             s=row_labels[k],
             ha='left',
             va='center',
             rotation='vertical',
             fontsize = 22,
-            color = "#e12020"
+            color = "#000000"
         )
 
-    
-    # Add a bar to separate inputs from the rest
-    bar_y = begin_vertical - 0.42 * vertical_step
-    bar_height = 0.005  # height in figure coordinates
 
-    # Add rectangle across the whole figure
-    fig.patches.append(
-        patches.Rectangle(
-            (0, bar_y),  # (x, y) in figure coordinates
-            1.0,         # full figure width
-            bar_height,
-            transform=fig.transFigure,
-            color='black'
-        )
-    )
 
 
 
@@ -217,8 +198,6 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
 
         # Number of horizontal slots (columns)
         nb_columns = 1 + num_scenarios + 1 + 1       # Pred deter + n scenarios + target + histogram 
-        if multiple_scenarios == True:
-            nb_columns += 1                             # Variance
 
         # Number of vertical slots (rows)
         nb_slots = num_channels + 1 + (len(list_input_plot))// nb_columns     # Input + DEM + temp_factor 
@@ -226,10 +205,13 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         plt.figure(figsize=(12 + 4 * nb_columns, 5 * num_channels))
 
         # Plot DEM & inputs on the first row
-        plot_img(dem_plot, "DEM", nb_slots, 1, "DEM", nb_column=nb_columns)
+        plot_img(dem_plot, "DEM", nb_slots, 1, "DEM", nb_column=nb_columns, plot_title=True)
 
         for k in range(len(list_input_plot)):
-            plot_img(list_input_plot[k], True, nb_slots, 2+k, f"Frame {k} \n (Timestep {list_time[k]})", nb_column=nb_columns)
+            temp_title = f"Frame {k}"
+            if k == len(list_input_plot) - 1:
+                temp_title = f"Frame {k} \n(to downscale)"
+            plot_img(list_input_plot[k], True, nb_slots, 2+k, temp_title, nb_column=nb_columns, plot_title=True)
 
         # Loop over the n timesteps
         for c in range(num_channels):
@@ -250,22 +232,6 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
                 plot_img(pred_img[k][c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + count + 1 + k, 
                         f"Final prediction \n Timestep {c+1} - Scenario {k+1}", delta=new_scale, nb_column=nb_columns)
             count += 1
-
-            # Plot the variance between scenarios
-            if num_scenarios >= 2:
-                std = [pred_img[k][c] for k in range(num_scenarios)]
-                std = np.stack(std, axis=0)
-                std = np.std(std, axis=0)
-                max_std = np.max(std)
-
-                # Min max normalization to scale the std to [0, 1]
-                if max_std != 0:
-                    normalized_std = std / max_std
-                else:
-                    normalized_std = np.zeros_like(std)
-                plot_img(normalized_std, "variance", nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + count, 
-                            f"Scenarios variance \n Timestep {c+1}", delta=new_scale, nb_column=nb_columns)
-                count += 1
 
             # Plot target
             plot_img(target_img[c], True, nb_slots, nb_columns*((len(list_input_plot))//nb_columns) + nb_columns*(c+1) + num_scenarios + count, 
@@ -294,8 +260,9 @@ def save_images(list_input, time_idx, predictions_final, prediction_deter, dem, 
         else:
             name_file = f"Random_{index_folder}/Random {i + 1} file"
 
-
-        plt.savefig(os.path.join(output_dir, f"{output_dir}/{name_file}.png"), bbox_inches = "tight")
+        plt.subplots_adjust(hspace=0.1) 
+        plt.subplots_adjust(wspace=0.001) 
+        plt.savefig(os.path.join(output_dir, f"{output_dir}/{name_file}.pdf"), bbox_inches = "tight")
         plt.close()
 
 

@@ -143,10 +143,6 @@ def apply_conservative_regridding_final_output(B_pred, LR_input, spatial_factor,
         f_output_non_null = f_output[mask]
         sum_non_null = sum_f[mask]
 
-        print(P_lr_non_null.shape)
-        print(f_output_non_null.shape)
-        print(sum_non_null.shape)
-
         # Compute the final (constrained) predictions
         output_final_non_null = f_output_non_null * (P_lr_non_null * temp_factor * (spatial_factor ** 2) / sum_non_null)   # shape: (B', C, H, W)
         output_final_null = prediction[~mask]
