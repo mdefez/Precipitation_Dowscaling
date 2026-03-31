@@ -52,3 +52,31 @@ class nearest_neighbor(nn.Module):
         frames_sr = frames_sr.permute(1, 0, 2, 3)       # (B, self.temp_factor, H, W) 
 
         return frames_sr
+    
+
+class edsr_baseline(nn.Module):
+    def __init__(self, temp_factor, spatial_factor, models, list_scales):
+        super().__init__()
+        
+        self.temp_factor = temp_factor 
+        self.spatial_factor = spatial_factor 
+
+        self.models = models
+        self.list_scales = list_scales
+
+        self.p = 1
+        for scale in self.list_scales:
+            self.p *= scale
+
+
+    def forward(self, frames, dem, apply_constraint = False): # We won't use the dem. Frames is a list of length = n_inputs and item = (B, 1, 1, H, W)
+        last_frame = frames[-1].squeeze(1) # We super resolve only the last image. We should provide the interpolate function in shape (B, C = 1, H, W)
+
+        # Super resolve in space
+        for model in self.models:
+            last_frame = model(last_frame)
+
+        last_frame_sr = F.interpolate(last_frame, scale_factor = self.spatial_factor/self.p, mode='nearest') # (B, C, H, W)
+
+        return last_frame_sr
+

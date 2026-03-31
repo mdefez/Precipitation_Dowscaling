@@ -104,8 +104,11 @@ class RainSuperResDataset(Dataset):
         low_res_tensors = [torch.tensor(npy).unsqueeze(0).unsqueeze(0).float() for npy in low_res_frames] # List of (1, 1, H, W)
 
         # Load the DEM
-        channel = np.load(os.path.join(self.channel_root, self.dem_name(domain)))
-        channel = torch.tensor(channel).unsqueeze(0).float() # (1, H, W)
+        if self.channel_root != None:
+            channel = np.load(os.path.join(self.channel_root, self.dem_name(domain)))
+            channel = torch.tensor(channel).unsqueeze(0).float() # (1, H, W)
+        else:
+            channel = torch.tensor([0])
 
         # Load the high res targets
         targets = []
@@ -134,8 +137,11 @@ class RainSuperResDataset(Dataset):
         targets = targets.squeeze(1) # (temp_factor, H, W)
 
         # Store the data in the device
-        channel, targets = channel.to(device), targets.to(device)
-        for k in range(len(low_res_tensors)):
-                low_res_tensors[k] = low_res_tensors[k].to(device)
+        try:
+            channel, targets = channel.to(device), targets.to(device)
+            for k in range(len(low_res_tensors)):
+                    low_res_tensors[k] = low_res_tensors[k].to(device)
+        except:
+            pass
 
         return low_res_tensors, channel, targets, low_res_idx # (List of inputs, dem, Tensor of targets, List of timesteps corresponding to targets)

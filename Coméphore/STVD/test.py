@@ -16,7 +16,8 @@ import os
 import matplotlib.pyplot as plt
 from Coméphore.Deterministic.loss import PITD
 import matplotlib.colors as mcolors
-from Coméphore.Deterministic.baseline import nearest_neighbor, bicubic
+from Coméphore.Deterministic.baseline import nearest_neighbor, bicubic, edsr_baseline
+from torchsr.models import edsr, ninasr_b2
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 import numpy as np
@@ -294,12 +295,45 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         model_deter = nearest_neighbor(temp_factor=temp_factor, spatial_factor=spatial_factor)
         model_deter.to(device)
 
+    elif asked_model == "edsr":
+        list_scales, path_weight = model_parameters
+        models = []
+        for scale in list_scales:
+            models.append(edsr(scale=scale, pretrained=False))
+
+        count = 0
+        for model in models:
+            if count == 0:
+                model.head[0] = torch.nn.Conv2d(1, 256, kernel_size=3, padding=1)
+            else:
+                model.head[0] = torch.nn.Conv2d(56, 256, kernel_size=3, padding=1)
+            
+            if count == len(list_scales)-1:
+                model.tail[1] = torch.nn.Conv2d(256, temp_factor, kernel_size=3, padding=1)
+            else:
+                model.tail[1] = torch.nn.Conv2d(256, 56, kernel_size=3, padding=1)
+            model.sub_mean = torch.nn.Identity()
+            model.add_mean = torch.nn.Identity()
+            count += 1
+
+
+        checkpoint = torch.load(working_directory + path_weight, map_location=device)
+
+        for k in range(len(models)):
+            models[k].load_state_dict(checkpoint[f"model_{k+1}"])
+            models[k].to(device)
+            models[k].eval()
+
+        model_deter = edsr_baseline(temp_factor=temp_factor, spatial_factor=spatial_factor, 
+                                    models=models, list_scales=list_scales)
+        model_deter.to(device)    
+
     # Filepath to the .pth file, where are stored the model's weights
     filepath_deter = working_directory + f'/Deterministic/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
     filepath_diffu = working_directory + f'/Diffusion/weights/spatial_{spatial_factor}_temp_{temp_factor}/{name_of_the_run}.pth' # Weights to load
 
 
-    if asked_model not in ["bicubic", "nearest_neighbor"]: # If the model is trainable, load the weights
+    if asked_model not in ["bicubic", "nearest_neighbor", "edsr"]: # If the model is trainable, load the weights
         model_deter = load_model(model, filepath_deter)  # Load the weights
         model_deter.to(device)
 
@@ -408,7 +442,7 @@ def test(test_dataset, spatial_factor, temp_factor, name_of_the_run, n_scenarios
         ploted_sample_pitd = False      # Keep track of the sample PITD plot, we plot them only for the first batch
         dict_pdf = {}                   # This dictionnary stores the values of the pdf (of each sample) that helps building each PIT plot. The goal is to compute an "average" PIT for the whole dataset and evaluate the model calibration
 
-        Time_limit = 2.8 * 24 * 60 * 60  # If the code runs for more than 2.7 days, break it and return the temporary results
+        Time_limit = 2 * 24 * 60 * 60  # If the code runs for more than 2.7 days, break it and return the temporary results
         multiple_scenarios = True if n_scenarios >=2 else False
 
         # Loop over the testing set
